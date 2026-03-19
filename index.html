@@ -375,13 +375,13 @@
     text-align: right;
   }
 
-  .att-pct.high { color: #8abf50; }
-  .att-pct.mid { color: #d4c84a; }
+  .att-pct.high { color: #b5c225; }
+  .att-pct.mid { color: #e0a820; }
   .att-pct.low { color: #c94c4c; }
   .att-pct.exact100 { color: #4caa6e; }
   .att-bar-fill.exact100 { background: #4caa6e; }
-  .att-bar-fill.high { background: #8abf50; }
-  .att-bar-fill.mid { background: #d4c84a; }
+  .att-bar-fill.high { background: #b5c225; }
+  .att-bar-fill.mid { background: #e0a820; }
   .att-bar-fill.low { background: #c94c4c; }
   .att-pct.na { color: var(--text-dim); font-weight: 400; font-family: 'Crimson Pro', serif; font-style: italic; }
 
@@ -987,7 +987,7 @@
   }
 
 </style>
-<script>const whTooltips = {colorLinks: true, iconizeLinks: true, iconSize: 'small', rename: true, hide: {molt: true}};</script>
+<script>const whTooltips = {colorLinks: true, iconizeLinks: true, iconSize: 'small', rename: true, hide: {molt: true}, defaultZone: 'tbc'};</script>
 <script src="https://wow.zamimg.com/widgets/power.js"></script>
 </head>
 <body>
@@ -1105,6 +1105,7 @@ function normalizeDate(d) {
 
 let lootByPlayer = {};
 let itemMap = {}; // normalized item name -> { id, name }
+let itemValueMap = {}; // normalized item name -> loot value (number)
 let itemIcons = {}; // item id -> icon name
 let claSheets = [];
 let claDataByPlayer = {};
@@ -1204,8 +1205,8 @@ function classColor(playerName) {
 
 // ── Shared 5-band colour palette ────────────────────────────────
 const C1 = '#4caa6e'; // green
-const C2 = '#8abf50'; // yellow-green
-const C3 = '#d4c84a'; // yellow
+const C2 = '#b5c225'; // yellow-green
+const C3 = '#e0a820'; // yellow
 const C4 = '#e07830'; // orange
 const C5 = '#c94c4c'; // red
 let groupingMode = 'role'; // 'role' | 't45' | 't6'
@@ -1369,6 +1370,14 @@ function parseItemSheet(text) {
   }
 }
 
+function lootValueColor(value) {
+  if (value === 0)  return C1;  // green
+  if (value <= 2)   return C2;  // yellow-green
+  if (value <= 4)   return C3;  // yellow
+  if (value <= 7)   return C4;  // orange
+  return C5;                    // red
+}
+
 function getItemId(itemName) {
   const key = normalizeName(itemName);
   return itemMap[key]?.id || ITEM_IDS[key] || null;
@@ -1384,7 +1393,7 @@ function itemLink(itemName, linkText) {
   const id = getItemId(itemName);
   if (id) {
     const icon = itemIconImg(id);
-    return `<a href="https://www.wowhead.com/tbc/item=${id}" data-wowhead="item=${id}&domain=tbc" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:inherit;">${icon}${linkText}</a>`;
+    return `<a href="https://www.wowhead.com/tbc/item=${id}" data-wowhead="item=${id}&dataset=tbc" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:5px;text-decoration:none;color:inherit;">${icon}${linkText}</a>`;
   }
   return `<a href="https://www.wowhead.com/tbc/search?q=${encodeURIComponent(itemName)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit;">${linkText}</a>`;
 }
@@ -1450,10 +1459,11 @@ function parseLoot(text) {
     const row = parseRow(line);
     const item = row[2]?.trim();
     const player = row[4]?.trim();
+    const value = parseInt(row[3]?.trim()) || 0; // col D = item value
     if (!item || !player) continue;
     const key = normalizeName(player);
     if (!loot[key]) loot[key] = [];
-    loot[key].push(item);
+    loot[key].push({ name: item, value });
   }
   // Reverse each player's list so most recent loot appears first
   for (const key in loot) loot[key].reverse();
@@ -1595,23 +1605,29 @@ async function fetchData() {
     </div>`;
 
   try {
-    const text = await fetchSheet(SHEET_ID, '2077814587');
+    fetchItemMap(); // instant — populates from static map
+    fetchItemIcons(); // non-blocking background fetch
+
+    // Fire all fetches in parallel
+    const [attendanceText] = await Promise.all([
+      fetchSheet(SHEET_ID, '2077814587').catch(e => { throw new Error(`Attendance: ${e.message}`); }),
+      fetchLoot(),
+      fetchPoints(),
+      fetchClasses(),
+      fetchGlossary(),
+      fetchAllClaData(),
+    ]);
+
     let data;
     try {
-      data = parseCSV(text);
+      data = parseCSV(attendanceText);
       if (!data.dates.length) throw new Error('No raid dates found in header row — check sheet format');
       if (!data.roles.length) throw new Error('No role groups found — check sheet format');
     } catch(parseErr) {
       addError('Attendance Sheet', parseErr.message);
       throw parseErr;
     }
-    fetchItemMap(); // populates from static map + sheet
-    fetchItemIcons(); // async icon fetch, non-blocking
-    await fetchLoot();
-    await fetchPoints();
-    await fetchClasses();
-    await fetchGlossary();
-    await fetchAllClaData();
+
     if (fetchErrors.length) {
       setStatus(`Updated at ${new Date().toLocaleTimeString()} — <span style="cursor:pointer;text-decoration:underline;" onclick="showErrors()">⚠ ${fetchErrors.length} warning(s) (click to view)</span>`, 'loading');
     } else {
@@ -2097,7 +2113,7 @@ function toggleLoot(td, playerName) {
   }
 
   const key = normalizeName(playerName);
-  const items = lootByPlayer[key] || [];
+  const items = (lootByPlayer[key] || []).map(i => typeof i === 'object' ? i : { name: i, value: 0 });
 
   const lootTr = document.createElement('tr');
   lootTr.className = 'loot-row';
@@ -2109,10 +2125,13 @@ function toggleLoot(td, playerName) {
 
   // Loot section
   html += `<div class="expand-section-title">Loot Received</div>`;
-  if (items.length === 0) {
+  if (!items || items.length === 0) {
     html += `<em class="no-loot">No loot recorded</em>`;
   } else {
-    html += `<div class="loot-list">${items.map(item => `<span class="loot-item">${itemLink(item, item)}</span>`).join('')}</div>`;
+    html += `<div class="loot-list">${items.map(({name, value}) => {
+    const col = lootValueColor(value);
+    return `<span class="loot-item" style="border-color:${col};background:${col}18;">${itemLink(name, name)}</span>`;
+  }).join('')}</div>`;
   }
 
   html += `</td>`;
@@ -2265,31 +2284,22 @@ async function fetchAllClaData() {
   claDataByPlayer = {};
   buffScoreByPlayerDate = {};
   latestGearIssuesByPlayer = {};
-  for (const sheet of claSheets) {
-    // Fetch gear issues
-    try {
-      const text = await fetchSheet(sheet.sheetId, sheet.gearGid);
-      try {
-        parseGearIssues(text, sheet.label);
-      } catch(parseErr) {
-        addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, `Parse error: ${parseErr.message}`);
-      }
-    } catch(e) {
-      addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, e.message);
-    }
 
-    // Fetch buff consumables
-    try {
-      const text = await fetchSheet(sheet.sheetId, sheet.buffGid);
-      try {
-        parseBuffConsumables(text, sheet.label);
-      } catch(parseErr) {
-        addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, `Parse error: ${parseErr.message}`);
-      }
-    } catch(e) {
-      addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, e.message);
-    }
-  }
+  // Fetch all CLA sheets in parallel (both gear and buffs for each sheet simultaneously)
+  await Promise.all(claSheets.flatMap(sheet => [
+    fetchSheet(sheet.sheetId, sheet.gearGid)
+      .then(text => {
+        try { parseGearIssues(text, sheet.label); }
+        catch(e) { addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, `Parse error: ${e.message}`); }
+      })
+      .catch(e => addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, e.message)),
+    fetchSheet(sheet.sheetId, sheet.buffGid)
+      .then(text => {
+        try { parseBuffConsumables(text, sheet.label); }
+        catch(e) { addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, `Parse error: ${e.message}`); }
+      })
+      .catch(e => addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, e.message)),
+  ]));
 }
 
 
@@ -2617,12 +2627,12 @@ function onItemChange() {
   // Show item icon + link above the table
   const itemId = getItemId(item);
   const itemIconHtml = itemId && itemIcons[itemId]
-    ? `<a href="https://www.wowhead.com/tbc/item=${itemId}" data-wowhead="item=${itemId}&domain=tbc" target="_blank" rel="noopener" style="flex-shrink:0;"><img src="https://wow.zamimg.com/images/wow/icons/large/${itemIcons[itemId]}.jpg" style="width:40px;height:40px;border:2px solid var(--gold-dim);border-radius:4px;display:block;" /></a>`
+    ? `<a href="https://www.wowhead.com/tbc/item=${itemId}" data-wowhead="item=${itemId}&dataset=tbc" target="_blank" rel="noopener" style="flex-shrink:0;"><img src="https://wow.zamimg.com/images/wow/icons/large/${itemIcons[itemId]}.jpg" style="width:40px;height:40px;border:2px solid var(--gold-dim);border-radius:4px;display:block;" /></a>`
     : '';
   const itemHeaderHtml = itemId
     ? `<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
         ${itemIconHtml}
-        <a href="https://www.wowhead.com/tbc/item=${itemId}" data-wowhead="item=${itemId}&domain=tbc" target="_blank" rel="noopener" style="font-family:'Cinzel',serif;font-size:16px;color:var(--gold);text-decoration:none;">${item}</a>
+        <a href="https://www.wowhead.com/tbc/item=${itemId}" data-wowhead="item=${itemId}&dataset=tbc" target="_blank" rel="noopener" style="font-family:'Cinzel',serif;font-size:16px;color:var(--gold);text-decoration:none;">${item}</a>
        </div>`
     : `<div style="margin-bottom:16px;font-family:'Cinzel',serif;font-size:16px;color:var(--gold);">${item}</div>`;
 
@@ -2656,7 +2666,7 @@ function onItemChange() {
   }
 
   // Check who has already received this item
-  const hasItem = p => (lootByPlayer[normalizeName(p.name)] || []).some(l => l.toLowerCase() === item.toLowerCase());
+  const hasItem = p => (lootByPlayer[normalizeName(p.name)] || []).some(l => (l.name || l).toLowerCase() === item.toLowerCase());
 
   const haveIt = eligible.filter(p => hasItem(p));
   const needIt = eligible.filter(p => !hasItem(p) && !p.inactive);
@@ -2808,7 +2818,7 @@ function onItemChange() {
       <td class="att-count" style="text-align:right;">${p.attended}</td>
       <td>
         <div class="att-cell">
-          <div class="att-bar-bg"><div class="att-bar-fill ${attCol === '#4caa6e' ? 'exact100' : attCol === '#8abf50' ? 'high' : attCol === '#d4c84a' ? 'mid' : 'low'}" style="width:${barW}%"></div></div>
+          <div class="att-bar-bg"><div class="att-bar-fill ${attCol === '#4caa6e' ? 'exact100' : attCol === '#b5c225' ? 'high' : attCol === '#e0a820' ? 'mid' : 'low'}" style="width:${barW}%"></div></div>
           <span class="att-pct" style="color:${attCol};">${pctStr}</span>
         </div>
       </td>
