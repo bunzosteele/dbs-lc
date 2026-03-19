@@ -1060,415 +1060,16 @@ function normalizeDate(d) {
 }
 
 let lootByPlayer = {};
+let claSheets = [];
+let claDataByPlayer = {};
+let buffScoreByPlayerDate = {}; // normalized name -> { normalizedDate -> pct }
+let latestGearIssuesByPlayer = {}; // normalized name -> { label, issues[] }
 let classMap = {}; // normalized name -> class (e.g. 'Warrior')
 let glossaryData = []; // array of { raid, boss, item, eligibleClasses[] }
 let lootSortCol = 'priority';
-let lootSortDir = 'desc'; // normalized name -> [item, item, ...]
-
-async function fetchGlossary(workingProxy) {
-  const ordered = workingProxy ? [workingProxy, ...PROXIES.filter(p => p !== workingProxy)] : PROXIES;
-  for (const proxy of ordered) {
-    try {
-      const res = await fetch(proxy(GLOSSARY_URL));
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const text = await res.text();
-      if (!text.includes(',')) throw new Error('Not CSV');
-      glossaryData = parseGlossary(text);
-      renderLootDropdowns(); // refresh if loot view is active
-      return;
-    } catch(e) { console.warn('Glossary fetch failed:', e.message); }
-  }
-  addError('Loot Glossary Sheet (gid: 917147935)', 'All proxies failed — loot lookup unavailable');
-}
-
-function parseGlossary(text) {
-  const rows = parseCsvRows(text);
-  const data = [];
-  for (let i = 1; i < rows.length; i++) { // skip header row
-    const row = rows[i];
-    const raid = row[0]?.trim();
-    const boss = row[1]?.trim();
-    const item = row[2]?.trim();
-    const eligibleStr = row[9]?.trim(); // col J (index 9)
-    if (!raid || !boss || !item) continue;
-    const eligibleClasses = eligibleStr ? eligibleStr.split(',').map(c => c.trim()).filter(Boolean) : [];
-    const hardPrioStr = row[12]?.trim(); // col M
-    const softPrioStr = row[13]?.trim(); // col N
-    const hardPrio = hardPrioStr ? hardPrioStr.split(',').map(c => c.trim()).filter(Boolean) : [];
-    const softPrio = softPrioStr ? softPrioStr.split(',').map(c => c.trim()).filter(Boolean) : [];
-    // Cols E-H (indices 4-7): Tank, Physical DPS, Ranged DPS, Healer
-    // If cell is non-empty, that role is eligible. Empty means no restriction if all 4 are empty.
-    const roleColMap = [
-      { idx: 4, role: 'Tanks' },
-      { idx: 5, role: 'Physical DPS' },
-      { idx: 6, role: 'Ranged DPS' },
-      { idx: 7, role: 'Healers' },
-    ];
-    const eligibleRoles = roleColMap.filter(r => row[r.idx]?.trim()).map(r => r.role);
-    data.push({ raid, boss, item, eligibleClasses, eligibleRoles, hardPrio, softPrio });
-  }
-  return data;
-}
-
-async function fetchClasses(workingProxy) {
-  const ordered = workingProxy ? [workingProxy, ...PROXIES.filter(p => p !== workingProxy)] : PROXIES;
-  for (const proxy of ordered) {
-    try {
-      const res = await fetch(proxy(CLASSES_URL));
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const text = await res.text();
-      if (!text.includes(',')) throw new Error('Not CSV');
-      classMap = parseClasses(text);
-      return;
-    } catch(e) { console.warn('Classes fetch failed:', e.message); }
-  }
-  addError('Classes Sheet (gid: 139934655)', 'All proxies failed — class colours unavailable');
-}
-
-function parseClasses(text) {
-  const rows = parseCsvRows(text);
-  // Row index 1 = class headers (cols 1+), rows 2+ = players
-  const headers = rows[1].slice(1).map(h => h.trim()).filter(h => h);
-  const map = {};
-  for (let r = 2; r < rows.length; r++) {
-    const row = rows[r];
-    for (let c = 0; c < headers.length; c++) {
-      const name = row[c + 1]?.trim();
-      if (name) map[normalizeName(name)] = headers[c];
-    }
-  }
-  return map;
-}
-
-async function fetchLoot(workingProxy) {
-  // Try the known-working proxy first, then fall back to others
-  const ordered = workingProxy
-    ? [workingProxy, ...PROXIES.filter(p => p !== workingProxy)]
-    : PROXIES;
-  for (const proxy of ordered) {
-    try {
-      const res = await fetch(proxy(LOOT_URL));
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const text = await res.text();
-      if (!text.trim() || !text.includes(',')) throw new Error('No CSV content');
-      lootByPlayer = parseLoot(text);
-      return;
-    } catch(e) {
-      console.warn('Loot proxy failed:', e.message);
-    }
-  }
-  addError('Loot Sheet (gid: 964257878)', 'All proxies failed — loot data unavailable');
-}
-
-async function fetchPoints(workingProxy) {
-  const ordered = workingProxy
-    ? [workingProxy, ...PROXIES.filter(p => p !== workingProxy)]
-    : PROXIES;
-  for (const proxy of ordered) {
-    try {
-      const res = await fetch(proxy(POINTS_URL));
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const text = await res.text();
-      if (!text.trim() || !text.includes(',')) throw new Error('No CSV content');
-      pointsByPlayer = parsePoints(text);
-      return;
-    } catch(e) {
-      console.warn('Points proxy failed:', e.message);
-    }
-  }
-  addError('Loot Summary Sheet (gid: 678080595)', 'All proxies failed — points data unavailable');
-}
-
-function parsePoints(text) {
-  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n');
-  function parseRow(line) {
-    const result = []; let cur = '', inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
-      else { cur += ch; }
-    }
-    result.push(cur.trim());
-    return result;
-  }
-  const points = {};
-  for (let i = 1; i < lines.length; i++) {
-    const row = parseRow(lines[i]);
-    const name = row[0]?.trim();
-    const pts = row[3]?.trim(); // col D = index 3
-    if (!name) continue;
-    const val = parseFloat(pts);
-    points[normalizeName(name)] = isNaN(val) ? 0 : val;
-  }
-  return points;
-}
-
-function parseLoot(text) {
-  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n');
-  function parseRow(line) {
-    const result = []; let cur = '', inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
-      else { cur += ch; }
-    }
-    result.push(cur.trim());
-    return result;
-  }
-  const loot = {};
-  for (const line of lines) {
-    const row = parseRow(line);
-    const item = row[2]?.trim();
-    const player = row[4]?.trim();
-    if (!item || !player) continue;
-    const key = normalizeName(player);
-    if (!loot[key]) loot[key] = [];
-    loot[key].push(item);
-  }
-  // Reverse each player's list so most recent loot appears first
-  for (const key in loot) loot[key].reverse();
-  return loot;
-}
-
-const PROXIES = [
-  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.org/?url=${encodeURIComponent(url)}`,
-  url => `https://api.cors.lol/?url=${encodeURIComponent(url)}`,
-  url => `https://worker.jaxony.com/corsproxy?url=${encodeURIComponent(url)}`,
-];
-
-// ── Error collection & display ──────────────────────────────────
-const fetchErrors = [];
-
-function addError(source, message) {
-  fetchErrors.push({ source, message, time: new Date().toLocaleTimeString() });
-}
-
-function showErrors() {
-  if (!fetchErrors.length) return;
-  const out = document.getElementById('output');
-  const rows = fetchErrors.map(e =>
-    `<tr>
-      <td style="padding:6px 12px;color:var(--gold);white-space:nowrap;font-family:'Cinzel',serif;font-size:12px;">${e.source}</td>
-      <td style="padding:6px 12px;color:var(--text);font-size:14px;">${e.message}</td>
-      <td style="padding:6px 12px;color:var(--text-dim);font-size:12px;white-space:nowrap;">${e.time}</td>
-    </tr>`
-  ).join('');
-  out.innerHTML = `
-    <div style="border:1px solid var(--red);background:rgba(201,76,76,0.06);padding:20px 24px;">
-      <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.2em;color:var(--red);margin-bottom:16px;">⚠ DATA LOAD ERRORS</div>
-      <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr>
-            <th style="padding:4px 12px;text-align:left;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);border-bottom:1px solid var(--border);">Source</th>
-            <th style="padding:4px 12px;text-align:left;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);border-bottom:1px solid var(--border);">Error</th>
-            <th style="padding:4px 12px;text-align:left;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);border-bottom:1px solid var(--border);">Time</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
-      <div style="margin-top:16px;font-size:13px;color:var(--text-dim);font-style:italic;">Check that the spreadsheet is public and GIDs are correct. Then click Fetch Data to retry.</div>
-    </div>`;
-}
-
-function setStatus(msg, type='') {
-  const el = document.getElementById('status');
-  const btn = document.querySelector('.btn.primary');
-  if (type === 'loading') {
-    el.innerHTML = '<span class="spinner"></span>' + msg;
-    if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; btn.style.cursor = 'not-allowed'; }
-  } else {
-    el.textContent = msg;
-    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.style.cursor = ''; }
-  }
-  el.className = 'status ' + type;
-}
-
-async function fetchData() {
-  fetchErrors.length = 0; // clear previous errors
-  setStatus('Summoning the scrolls...', 'loading');
-  document.getElementById('output').innerHTML = `
-    <div class="empty">
-      <div class="icon" style="animation: spin 1.5s linear infinite; display:inline-block;">⚔</div>
-      <div style="margin-top:16px;">Fetching data&hellip; please wait.</div>
-    </div>`;
-
-  let lastError;
-  for (const proxy of PROXIES) {
-    try {
-      const res = await fetch(proxy(CSV_URL));
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const text = await res.text();
-      if (!text.trim() || !text.includes(',')) throw new Error('Response does not look like CSV');
-      let data;
-      try {
-        data = parseCSV(text);
-        if (!data.dates.length) throw new Error('No raid dates found in header row — check sheet format');
-        if (!data.roles.length) throw new Error('No role groups found — check sheet format');
-      } catch(parseErr) {
-        addError('Attendance Sheet', parseErr.message);
-        throw parseErr;
-      }
-      await fetchLoot(proxy);
-      await fetchPoints(proxy);
-      await fetchClasses(proxy);
-      await fetchGlossary(proxy);
-      await fetchAllClaData(proxy);
-      if (fetchErrors.length) {
-        // Non-fatal errors — still render but show warning
-        setStatus(`Updated at ${new Date().toLocaleTimeString()} — ${fetchErrors.length} warning(s)`, 'loading');
-      } else {
-        setStatus(`Updated at ${new Date().toLocaleTimeString()}`, 'success');
-      }
-      render(data);
-      return;
-    } catch (e) {
-      lastError = e;
-    }
-  }
-
-  setStatus(`Failed to load data — ${lastError?.message}`, 'error');
-  showErrors();
-}
-
-function parseCSV(text) {
-  // Normalize line endings, strip BOM, split into rows
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^\uFEFF/, '').trim().split('\n');
-  // Parse each row properly handling quoted fields
-  function parseRow(line) {
-    const result = [];
-    let cur = '', inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { inQuotes = !inQuotes; }
-      else if (ch === ',' && !inQuotes) { result.push(cur.trim()); cur = ''; }
-      else { cur += ch; }
-    }
-    result.push(cur.trim());
-    return result;
-  }
-  const rows = lines.map(parseRow);
-  const header = rows[0];
-  const dates = header.slice(2).filter(d => d.trim());
-  const n = dates.length;
-
-  const roles = [];
-  let currentRole = null;
-
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row || row.length < 2) continue;
-    const name = row[0].trim();
-    const raidsVal = row[1].trim();
-
-    // Role header rows have a name, no raidsVal, and no TRUE/FALSE attendance values
-    const attendanceCols = row.slice(2, 2 + n).map(v => v.trim().toUpperCase());
-    const hasBooleans = attendanceCols.some(v => v === 'TRUE' || v === 'FALSE');
-    if (name && !raidsVal && !hasBooleans) {
-      currentRole = { name, players: [] };
-      roles.push(currentRole);
-      continue;
-    }
-    if (!name) continue;
-    if (!currentRole) continue;
-
-    const flags = row.slice(2, 2 + n).map(v => v.trim().toUpperCase() === 'TRUE');
-    const trueIdx = flags.map((b, i) => b ? i : -1).filter(i => i >= 0);
-
-    const totalRaids = n; // total raid columns with dates
-    if (trueIdx.length === 0) {
-      currentRole.players.push({ name, attended: 0, window: 0, pct: null, flags, n, inactive: false });
-    } else {
-      const first = trueIdx[0], last = trueIdx[trueIdx.length - 1];
-      const window = last - first + 1;
-      const attended = flags.slice(first, last + 1).filter(Boolean).length;
-      const pct = (attended / window) * 100;
-      const raidsSinceLast = (totalRaids - 1) - last; // how many raids after their last attendance
-      const inactive = raidsSinceLast > 2;
-      currentRole.players.push({ name, attended, window, pct, flags, n, first, last, inactive });
-    }
-  }
-
-  return { dates, roles };
-}
-
-// Sort state per role: { [roleName]: { col, dir } }
-// col: 'player' | 'points' | 'consumes' | 'attendance' | 'priority'
-// dir: 'asc' | 'desc'
+let lootSortDir = 'desc';
 const roleSortState = {};
-
-function getSortedPlayers(role, players, bottom20threshold, top20threshold, pointValues) {
-  const state = roleSortState[role] || { col: 'priority', dir: 'desc' };
-  const { col, dir } = state;
-
-  const withPct = players.filter(p => p.pct !== null && !p.inactive);
-  const inactive = players.filter(p => p.inactive);
-  const noPct   = players.filter(p => p.pct === null && !p.inactive);
-
-  withPct.sort((a, b) => {
-    let av, bv;
-    if (col === 'player') {
-      av = a.name.toLowerCase(); bv = b.name.toLowerCase();
-    } else if (col === 'points') {
-      av = pointsByPlayer[normalizeName(a.name)] ?? 0;
-      bv = pointsByPlayer[normalizeName(b.name)] ?? 0;
-    } else if (col === 'consumes') {
-      const aScores = Object.values(buffScoreByPlayerDate[normalizeName(a.name)] || {}).map(v => v?.total).filter(v => v !== null);
-      const bScores = Object.values(buffScoreByPlayerDate[normalizeName(b.name)] || {}).map(v => v?.total).filter(v => v !== null);
-      av = aScores.length ? aScores.reduce((x,y) => x+y,0) / aScores.length : -1;
-      bv = bScores.length ? bScores.reduce((x,y) => x+y,0) / bScores.length : -1;
-    } else if (col === 'priority') {
-      av = calculatePriority(a, bottom20threshold, top20threshold, pointValues).score;
-      bv = calculatePriority(b, bottom20threshold, top20threshold, pointValues).score;
-    } else if (col === 'pct') {
-      av = a.pct ?? -1; bv = b.pct ?? -1;
-    } else { // attendance (count)
-      av = a.attended; bv = b.attended;
-    }
-    if (av < bv) return dir === 'asc' ? -1 : 1;
-    if (av > bv) return dir === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  return [...withPct, ...noPct, ...inactive];
-}
-
-function toggleRole(safeId) {
-  const body = document.getElementById('rolebody-' + safeId);
-  const arrow = document.getElementById('roletoggle-' + safeId);
-  if (!body) return;
-  const collapsed = body.style.display === 'none';
-  body.style.display = collapsed ? '' : 'none';
-  if (arrow) arrow.textContent = collapsed ? '▾' : '▸';
-}
-
-function setSort(safeId, roleName, col) {
-  const cur = roleSortState[roleName] || { col: 'priority', dir: 'desc' };
-  const dir = cur.col === col ? (cur.dir === 'desc' ? 'asc' : 'desc') : 'desc';
-  roleSortState[roleName] = { col, dir };
-  const tbody = document.getElementById('table-' + safeId);
-  if (!tbody) return;
-  const role = lastRenderData.roles.find(r => r.name === roleName);
-  if (!role) return;
-  renderRoleBody(tbody, role, lastRenderData.dates, lastRenderData.thresholds[roleName]);
-  // Update header arrows
-  const thead = document.getElementById('thead-' + safeId);
-  if (!thead) return;
-  const state = roleSortState[roleName];
-  thead.querySelectorAll('th[data-col]').forEach(th => {
-    const arrow = th.querySelector('.sort-arrow');
-    if (!arrow) return;
-    arrow.textContent = th.dataset.col === state.col ? (state.dir === 'desc' ? ' ▾' : ' ▴') : ' ⬦';
-  });
-}
-
 let lastRenderData = { roles: [], dates: [], thresholds: {} };
-let groupingMode = 'role'; // 'role' | 't45' | 't6'
-
 const GROUPINGS = {
   t45: [
     { name: 'Defender', classes: ['Warrior', 'Druid', 'Priest'] },
@@ -1561,6 +1162,402 @@ const C2 = '#8abf50'; // yellow-green
 const C3 = '#d4c84a'; // yellow
 const C4 = '#e07830'; // orange
 const C5 = '#c94c4c'; // red
+let groupingMode = 'role'; // 'role' | 't45' | 't6'
+
+async function fetchGlossary() {
+  try {
+    const text = await fetchSheet(SHEET_ID, '917147935');
+    glossaryData = parseGlossary(text);
+    if (typeof renderLootDropdowns === 'function') renderLootDropdowns();
+  } catch(e) {
+    addError('Loot Glossary Sheet (gid: 917147935)', e.message);
+  }
+}
+
+function parseCsvRows(text) {
+  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n');
+  return lines.map(line => {
+    const result = []; let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    result.push(cur.trim());
+    return result;
+  });
+}
+
+function parseGlossary(text) {
+  const rows = parseCsvRows(text);
+  const data = [];
+  for (let i = 1; i < rows.length; i++) { // skip header row
+    const row = rows[i];
+    const raid = row[0]?.trim();
+    const boss = row[1]?.trim();
+    const item = row[2]?.trim();
+    const eligibleStr = row[9]?.trim(); // col J (index 9)
+    if (!raid || !boss || !item) continue;
+    const eligibleClasses = eligibleStr ? eligibleStr.split(',').map(c => c.trim()).filter(Boolean) : [];
+    const hardPrioStr = row[12]?.trim(); // col M
+    const softPrioStr = row[13]?.trim(); // col N
+    const hardPrio = hardPrioStr ? hardPrioStr.split(',').map(c => c.trim()).filter(Boolean) : [];
+    const softPrio = softPrioStr ? softPrioStr.split(',').map(c => c.trim()).filter(Boolean) : [];
+    // Cols E-H (indices 4-7): Tank, Physical DPS, Ranged DPS, Healer
+    // If cell is non-empty, that role is eligible. Empty means no restriction if all 4 are empty.
+    const roleColMap = [
+      { idx: 4, role: 'Tanks' },
+      { idx: 5, role: 'Physical DPS' },
+      { idx: 6, role: 'Ranged DPS' },
+      { idx: 7, role: 'Healers' },
+    ];
+    const eligibleRoles = roleColMap.filter(r => row[r.idx]?.trim()).map(r => r.role);
+    data.push({ raid, boss, item, eligibleClasses, eligibleRoles, hardPrio, softPrio });
+  }
+  return data;
+}
+
+async function fetchClasses() {
+  try {
+    const text = await fetchSheet(SHEET_ID, '139934655');
+    classMap = parseClasses(text);
+  } catch(e) {
+    addError('Classes Sheet (gid: 139934655)', e.message);
+  }
+}
+
+function parseClasses(text) {
+  const rows = parseCsvRows(text);
+  // Row index 1 = class headers (cols 1+), rows 2+ = players
+  const headers = rows[1].slice(1).map(h => h.trim()).filter(h => h);
+  const map = {};
+  for (let r = 2; r < rows.length; r++) {
+    const row = rows[r];
+    for (let c = 0; c < headers.length; c++) {
+      const name = row[c + 1]?.trim();
+      if (name) map[normalizeName(name)] = headers[c];
+    }
+  }
+  return map;
+}
+
+async function fetchLoot() {
+  try {
+    const text = await fetchSheet(SHEET_ID, '964257878');
+    lootByPlayer = parseLoot(text);
+  } catch(e) {
+    addError('Loot Sheet (gid: 964257878)', e.message);
+  }
+}
+
+async function fetchPoints() {
+  try {
+    const text = await fetchSheet(SHEET_ID, '678080595');
+    pointsByPlayer = parsePoints(text);
+  } catch(e) {
+    addError('Loot Summary Sheet (gid: 678080595)', e.message);
+  }
+}
+
+function parsePoints(text) {
+  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n');
+  function parseRow(line) {
+    const result = []; let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    result.push(cur.trim());
+    return result;
+  }
+  const points = {};
+  for (let i = 1; i < lines.length; i++) {
+    const row = parseRow(lines[i]);
+    const name = row[0]?.trim();
+    const pts = row[3]?.trim(); // col D = index 3
+    if (!name) continue;
+    const val = parseFloat(pts);
+    points[normalizeName(name)] = isNaN(val) ? 0 : val;
+  }
+  return points;
+}
+
+function parseLoot(text) {
+  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n');
+  function parseRow(line) {
+    const result = []; let cur = '', inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    result.push(cur.trim());
+    return result;
+  }
+  const loot = {};
+  for (const line of lines) {
+    const row = parseRow(line);
+    const item = row[2]?.trim();
+    const player = row[4]?.trim();
+    if (!item || !player) continue;
+    const key = normalizeName(player);
+    if (!loot[key]) loot[key] = [];
+    loot[key].push(item);
+  }
+  // Reverse each player's list so most recent loot appears first
+  for (const key in loot) loot[key].reverse();
+  return loot;
+}
+
+const APPS_SCRIPT = 'https://script.google.com/macros/s/AKfycbwewgQ14fY_34nK0HpKRt2YuVy2FLQZmfu-FrjraGQa55I5oKmYk7p_X3zsswxZAPU4/exec';
+
+// Fetch a Google Sheet tab via Apps Script proxy
+async function fetchSheet(sheetId, gid) {
+  const url = `${APPS_SCRIPT}?sheetId=${sheetId}&gid=${gid}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const text = await res.text();
+  if (!text.trim() || !text.includes(',')) throw new Error('Response does not look like CSV');
+  return text;
+}
+
+// Legacy proxy list kept for CLA sheets from other spreadsheets
+const PROXIES = [
+  url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+];
+
+// ── Error collection & display ──────────────────────────────────
+const fetchErrors = [];
+
+function addError(source, message) {
+  fetchErrors.push({ source, message, time: new Date().toLocaleTimeString() });
+}
+
+function showErrors() {
+  if (!fetchErrors.length) return;
+  // Show in a modal-style overlay rather than replacing output
+  const existing = document.getElementById('errorPanel');
+  if (existing) { existing.remove(); return; } // toggle
+  const out = document.getElementById('output');
+  const rows = fetchErrors.map(e =>
+    `<tr>
+      <td style="padding:6px 12px;color:var(--gold);white-space:nowrap;font-family:'Cinzel',serif;font-size:12px;">${e.source}</td>
+      <td style="padding:6px 12px;color:var(--text);font-size:14px;">${e.message}</td>
+      <td style="padding:6px 12px;color:var(--text-dim);font-size:12px;white-space:nowrap;">${e.time}</td>
+    </tr>`
+  ).join('');
+  const panel = document.createElement('div');
+  panel.id = 'errorPanel';
+  panel.style.cssText = 'border:1px solid var(--red);background:rgba(201,76,76,0.06);padding:20px 24px;margin-bottom:24px;';
+  panel.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+      <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.2em;color:var(--red);">⚠ DATA LOAD WARNINGS</div>
+      <button onclick="document.getElementById('errorPanel').remove()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:16px;">✕</button>
+    </div>
+    <table style="width:100%;border-collapse:collapse;">
+      <thead>
+        <tr>
+          <th style="padding:4px 12px;text-align:left;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);border-bottom:1px solid var(--border);">Source</th>
+          <th style="padding:4px 12px;text-align:left;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);border-bottom:1px solid var(--border);">Error</th>
+          <th style="padding:4px 12px;text-align:left;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);border-bottom:1px solid var(--border);">Time</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+    <div style="margin-top:16px;font-size:13px;color:var(--text-dim);font-style:italic;">Check that the spreadsheet is public and GIDs are correct. Then click Fetch Data to retry.</div>
+  `;
+  out.parentNode.insertBefore(panel, out);
+}
+
+function setStatus(msg, type='') {
+  const el = document.getElementById('status');
+  const btn = document.querySelector('.btn.primary');
+  if (type === 'loading') {
+    el.innerHTML = '<span class="spinner"></span>' + msg;
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; btn.style.cursor = 'not-allowed'; }
+  } else {
+    el.innerHTML = msg;
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; btn.style.cursor = ''; }
+  }
+  el.className = 'status ' + type;
+}
+
+async function fetchData() {
+  fetchErrors.length = 0; // clear previous errors
+  setStatus('Summoning the scrolls...', 'loading');
+  document.getElementById('output').innerHTML = `
+    <div class="empty">
+      <div class="icon" style="animation: spin 1.5s linear infinite; display:inline-block;">⚔</div>
+      <div style="margin-top:16px;">Fetching data&hellip; please wait.</div>
+    </div>`;
+
+  try {
+    const text = await fetchSheet(SHEET_ID, '2077814587');
+    let data;
+    try {
+      data = parseCSV(text);
+      if (!data.dates.length) throw new Error('No raid dates found in header row — check sheet format');
+      if (!data.roles.length) throw new Error('No role groups found — check sheet format');
+    } catch(parseErr) {
+      addError('Attendance Sheet', parseErr.message);
+      throw parseErr;
+    }
+    await fetchLoot();
+    await fetchPoints();
+    await fetchClasses();
+    await fetchGlossary();
+    await fetchAllClaData();
+    if (fetchErrors.length) {
+      setStatus(`Updated at ${new Date().toLocaleTimeString()} — <span style="cursor:pointer;text-decoration:underline;" onclick="showErrors()">⚠ ${fetchErrors.length} warning(s) (click to view)</span>`, 'loading');
+    } else {
+      setStatus(`Updated at ${new Date().toLocaleTimeString()}`, 'success');
+    }
+    render(data);
+  } catch(e) {
+    setStatus(`Failed to load data — ${e?.message}`, 'error');
+    showErrors();
+  }
+}
+
+function parseCSV(text) {
+  // Normalize line endings, strip BOM, split into rows
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/^\uFEFF/, '').trim().split('\n');
+  // Parse each row properly handling quoted fields
+  function parseRow(line) {
+    const result = [];
+    let cur = '', inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuotes = !inQuotes; }
+      else if (ch === ',' && !inQuotes) { result.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    result.push(cur.trim());
+    return result;
+  }
+  const rows = lines.map(parseRow);
+  const header = rows[0];
+  const dates = header.slice(2).filter(d => d.trim());
+  const n = dates.length;
+
+  const roles = [];
+  let currentRole = null;
+
+  for (let i = 1; i < rows.length; i++) {
+    const row = rows[i];
+    if (!row || row.length < 2) continue;
+    const name = row[0].trim();
+    const raidsVal = row[1].trim();
+
+    // Role header rows have a name, no raidsVal, and no TRUE/FALSE attendance values
+    const attendanceCols = row.slice(2, 2 + n).map(v => v.trim().toUpperCase());
+    const hasBooleans = attendanceCols.some(v => v === 'TRUE' || v === 'FALSE');
+    if (name && !raidsVal && !hasBooleans) {
+      currentRole = { name, players: [] };
+      roles.push(currentRole);
+      continue;
+    }
+    if (!name) continue;
+    if (!currentRole) continue;
+
+    const flags = row.slice(2, 2 + n).map(v => v.trim().toUpperCase() === 'TRUE');
+    const trueIdx = flags.map((b, i) => b ? i : -1).filter(i => i >= 0);
+
+    const totalRaids = n; // total raid columns with dates
+    if (trueIdx.length === 0) {
+      currentRole.players.push({ name, attended: 0, window: 0, pct: null, flags, n, inactive: false });
+    } else {
+      const first = trueIdx[0], last = trueIdx[trueIdx.length - 1];
+      const window = last - first + 1;
+      const attended = flags.slice(first, last + 1).filter(Boolean).length;
+      const pct = (attended / window) * 100;
+      const raidsSinceLast = (totalRaids - 1) - last; // how many raids after their last attendance
+      const inactive = raidsSinceLast > 2;
+      currentRole.players.push({ name, attended, window, pct, flags, n, first, last, inactive });
+    }
+  }
+
+  return { dates, roles };
+}
+
+// Sort state per role: { [roleName]: { col, dir } }
+// col: 'player' | 'points' | 'consumes' | 'attendance' | 'priority'
+// dir: 'asc' | 'desc'
+
+
+function getSortedPlayers(role, players, bottom20threshold, top20threshold, pointValues) {
+  const state = roleSortState[role] || { col: 'priority', dir: 'desc' };
+  const { col, dir } = state;
+
+  const withPct = players.filter(p => p.pct !== null && !p.inactive);
+  const inactive = players.filter(p => p.inactive);
+  const noPct   = players.filter(p => p.pct === null && !p.inactive);
+
+  withPct.sort((a, b) => {
+    let av, bv;
+    if (col === 'player') {
+      av = a.name.toLowerCase(); bv = b.name.toLowerCase();
+    } else if (col === 'points') {
+      av = pointsByPlayer[normalizeName(a.name)] ?? 0;
+      bv = pointsByPlayer[normalizeName(b.name)] ?? 0;
+    } else if (col === 'consumes') {
+      const aScores = Object.values(buffScoreByPlayerDate[normalizeName(a.name)] || {}).map(v => v?.total).filter(v => v !== null);
+      const bScores = Object.values(buffScoreByPlayerDate[normalizeName(b.name)] || {}).map(v => v?.total).filter(v => v !== null);
+      av = aScores.length ? aScores.reduce((x,y) => x+y,0) / aScores.length : -1;
+      bv = bScores.length ? bScores.reduce((x,y) => x+y,0) / bScores.length : -1;
+    } else if (col === 'priority') {
+      av = calculatePriority(a, bottom20threshold, top20threshold, pointValues).score;
+      bv = calculatePriority(b, bottom20threshold, top20threshold, pointValues).score;
+    } else if (col === 'pct') {
+      av = a.pct ?? -1; bv = b.pct ?? -1;
+    } else { // attendance (count)
+      av = a.attended; bv = b.attended;
+    }
+    if (av < bv) return dir === 'asc' ? -1 : 1;
+    if (av > bv) return dir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  return [...withPct, ...noPct, ...inactive];
+}
+
+function toggleRole(safeId) {
+  const body = document.getElementById('rolebody-' + safeId);
+  const arrow = document.getElementById('roletoggle-' + safeId);
+  if (!body) return;
+  const collapsed = body.style.display === 'none';
+  body.style.display = collapsed ? '' : 'none';
+  if (arrow) arrow.textContent = collapsed ? '▾' : '▸';
+}
+
+function setSort(safeId, roleName, col) {
+  const cur = roleSortState[roleName] || { col: 'priority', dir: 'desc' };
+  const dir = cur.col === col ? (cur.dir === 'desc' ? 'asc' : 'desc') : 'desc';
+  roleSortState[roleName] = { col, dir };
+  const tbody = document.getElementById('table-' + safeId);
+  if (!tbody) return;
+  const role = lastRenderData.roles.find(r => r.name === roleName);
+  if (!role) return;
+  renderRoleBody(tbody, role, lastRenderData.dates, lastRenderData.thresholds[roleName]);
+  // Update header arrows
+  const thead = document.getElementById('thead-' + safeId);
+  if (!thead) return;
+  const state = roleSortState[roleName];
+  thead.querySelectorAll('th[data-col]').forEach(th => {
+    const arrow = th.querySelector('.sort-arrow');
+    if (!arrow) return;
+    arrow.textContent = th.dataset.col === state.col ? (state.dir === 'desc' ? ' ▾' : ' ▴') : ' ⬦';
+  });
+}
+
+
+
 
 function priorityColor(score) {
   // 100 / 90+ / 60+ / 30+ / <30
@@ -1615,11 +1612,12 @@ function calculatePriority(p, bottom20threshold, top20threshold, pointValues) {
   const nonZeroPts = pointValues.filter(v => v > 0);
   const minNonZeroPts = nonZeroPts.length > 0 ? nonZeroPts[0] : null;
   const isHighest = pointValues.length > 0 && pts === maxPts && pts > 0;
-  const isZeroOrLowest = pts === 0 || (minNonZeroPts !== null && pts === minNonZeroPts);
+  const hasZeros = pointValues.some(v => v === 0);
+  const isZeroOrLowest = pts === 0 || (!hasZeros && minNonZeroPts !== null && pts === minNonZeroPts);
   const isTop20 = !isHighest && !isZeroOrLowest && pts >= top20threshold && pointValues.length > 0;
   const isBottom20 = !isHighest && !isZeroOrLowest && pts <= bottom20threshold && pointValues.length > 0;
-  const lootMod = isHighest ? 0.2 : isTop20 ? 0.33 : isBottom20 ? 0.67 : isZeroOrLowest ? 0.8 : 0.5;
-  const lootTier = isHighest ? 'Highest in role (×0.2)' : isTop20 ? 'Top 20% (×0.33)' : isBottom20 ? 'Bottom 20% (×0.67)' : isZeroOrLowest ? 'Zero/lowest (×0.8)' : 'Mid 60% (×0.5)';
+  const lootMod = isHighest ? 0.3 : isTop20 ? 0.4 : isBottom20 ? 0.6 : isZeroOrLowest ? 0.7 : 0.5;
+  const lootTier = isHighest ? 'Highest in role (×0.3)' : isTop20 ? 'Top 20% (×0.4)' : isBottom20 ? 'Bottom 20% (×0.6)' : isZeroOrLowest ? 'Zero/lowest (×0.7)' : 'Mid 60% (×0.5)';
 
   const score = attScore * consumeMod * gearMod * lootMod;
 
@@ -1709,6 +1707,7 @@ function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, point
             if (!score) return '<span style="color:var(--text-dim);font-style:italic;font-size:12px;">—</span>';
             const normScore = score * priorityNorm;
             const col = priorityColor(normScore);
+            const displayStr = normScore % 1 === 0 ? normScore.toFixed(0) : normScore.toFixed(1);
             const fullTip = tooltip + `&#10;Score: ${score.toFixed(2)}`;
             return `<span class="priority-score" style="color:${col};" title="${fullTip}">${displayStr}</span>`;
           })()}</td>
@@ -1725,7 +1724,8 @@ function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, point
             const nzP  = pointValues.filter(v => v > 0);
             const minNzP = nzP.length > 0 ? nzP[0] : null;
             const hi  = pointValues.length > 0 && pts === maxP && pts > 0;
-            const zlo = pts === 0 || (minNzP !== null && pts === minNzP);
+            const hasZerosInRole = nzP.length < pointValues.length;
+    const zlo = pts === 0 || (!hasZerosInRole && minNzP !== null && pts === minNzP);
             const t20 = !hi && !zlo && pts >= top20threshold && pointValues.length > 0;
             const b20 = !hi && !zlo && pts <= bottom20threshold && pointValues.length > 0;
             const col = hi ? C5 : t20 ? C4 : b20 ? C2 : zlo ? C1 : C3;
@@ -1921,10 +1921,7 @@ function toggleLoot(td, playerName) {
 }
 
 // ── CLA Management ──────────────────────────────────────────────
-let claSheets = [];  // initialised below after function definitions
-let claDataByPlayer = {};
-let buffScoreByPlayerDate = {}; // normalized name -> { normalizedDate -> pct }
-let latestGearIssuesByPlayer = {}; // normalized name -> { label, issues[] } for most recent CLA only
+
 
 function saveClaSheets() {
   try { sessionStorage.setItem('claSheets', JSON.stringify(claSheets)); } catch(e) {}
@@ -1963,15 +1960,18 @@ function exportCla() {
   if (!claSheets.length) {
     setHint('No CLA sheets to export.', 'error'); return;
   }
-  const data = JSON.stringify(claSheets);
-  navigator.clipboard.writeText(data).then(() => {
-    setHint('Copied to clipboard!', 'success');
-  }).catch(() => {
-    // Fallback: show in textarea
-    document.getElementById('claImportArea').style.display = 'block';
-    document.getElementById('claImportText').value = data;
-    setHint('Clipboard unavailable — copy the text below manually.', 'error');
-  });
+  const data = JSON.stringify(claSheets, null, 2);
+  // Download as cla-sheets.json for easy repo upload
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'cla-sheets.json';
+  a.click();
+  URL.revokeObjectURL(url);
+  // Also copy to clipboard
+  navigator.clipboard.writeText(data).catch(() => {});
+  setHint('Downloaded cla-sheets.json — upload to your GitHub repo!', 'success');
 }
 
 function showImport() {
@@ -2046,69 +2046,37 @@ function removeCla(i) {
   renderClaList();
 }
 
-async function fetchAllClaData(workingProxy) {
+async function fetchAllClaData() {
   claDataByPlayer = {};
   buffScoreByPlayerDate = {};
   latestGearIssuesByPlayer = {};
   for (const sheet of claSheets) {
-    const gearUrl = `https://docs.google.com/spreadsheets/d/${sheet.sheetId}/export?format=csv&gid=${sheet.gearGid}`;
-    const buffUrl = `https://docs.google.com/spreadsheets/d/${sheet.sheetId}/export?format=csv&gid=${sheet.buffGid}`;
-    const ordered = workingProxy ? [workingProxy, ...PROXIES.filter(p => p !== workingProxy)] : PROXIES;
-
     // Fetch gear issues
-    let gearLoaded = false;
-    for (const proxy of ordered) {
+    try {
+      const text = await fetchSheet(sheet.sheetId, sheet.gearGid);
       try {
-        const res = await fetch(proxy(gearUrl));
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const text = await res.text();
-        if (!text.includes(',')) throw new Error('Response is not CSV');
-        try {
-          parseGearIssues(text, sheet.label);
-          gearLoaded = true;
-        } catch(parseErr) {
-          addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, `Parse error: ${parseErr.message}`);
-        }
-        break;
-      } catch(e) { console.warn('Gear issues fetch failed:', e.message); }
+        parseGearIssues(text, sheet.label);
+      } catch(parseErr) {
+        addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, `Parse error: ${parseErr.message}`);
+      }
+    } catch(e) {
+      addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, e.message);
     }
-    if (!gearLoaded) addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, 'All proxies failed — gear issue data unavailable');
 
     // Fetch buff consumables
-    let buffLoaded = false;
-    for (const proxy of ordered) {
+    try {
+      const text = await fetchSheet(sheet.sheetId, sheet.buffGid);
       try {
-        const res = await fetch(proxy(buffUrl));
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const text = await res.text();
-        if (!text.includes(',')) throw new Error('Response is not CSV');
-        try {
-          parseBuffConsumables(text, sheet.label);
-          buffLoaded = true;
-        } catch(parseErr) {
-          addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, `Parse error: ${parseErr.message}`);
-        }
-        break;
-      } catch(e) { console.warn('Buff consumables fetch failed:', e.message); }
+        parseBuffConsumables(text, sheet.label);
+      } catch(parseErr) {
+        addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, `Parse error: ${parseErr.message}`);
+      }
+    } catch(e) {
+      addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, e.message);
     }
-    if (!buffLoaded) addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, 'All proxies failed — consumable data unavailable');
   }
 }
 
-function parseCsvRows(text) {
-  const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n');
-  return lines.map(line => {
-    const result = []; let cur = '', inQ = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { inQ = !inQ; }
-      else if (ch === ',' && !inQ) { result.push(cur.trim()); cur = ''; }
-      else { cur += ch; }
-    }
-    result.push(cur.trim());
-    return result;
-  });
-}
 
 function parseGearIssues(text, label) {
   const rows = parseCsvRows(text);
@@ -2169,6 +2137,25 @@ function parseBuffConsumables(text, label) {
 // Initialise CLA list on load (after all functions defined)
 claSheets = loadClaSheets();
 renderClaList();
+
+// Auto-load CLA sheets from repo JSON if no sheets saved locally
+async function loadClaSheetsFromRepo() {
+  try {
+    const res = await fetch('./cla-sheets.json');
+    if (!res.ok) return; // file doesn't exist yet, silently skip
+    const data = await res.json();
+    if (!Array.isArray(data) || !data.length) return;
+    // Only use repo data if user has no locally saved sheets
+    if (!claSheets.length) {
+      claSheets = data;
+      saveClaSheets();
+      renderClaList();
+    }
+  } catch(e) {
+    // Not on GitHub Pages or file missing — ignore
+  }
+}
+loadClaSheetsFromRepo();
 
 // ── Custom Tooltip System ───────────────────────────────────────
 // Works on desktop (hover) and mobile (long-press)
