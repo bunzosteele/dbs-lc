@@ -1023,6 +1023,7 @@
         <input class="cla-input wide" id="claUrl" placeholder="Google Sheet URL" />
         <input class="cla-input" id="claGearGid" placeholder="Gear Issues GID" />
         <input class="cla-input" id="claBuffGid" placeholder="Buff Consumables GID" />
+        <input class="cla-input wide" id="claToken" type="password" placeholder="GitHub Token (optional — saves to repo)" />
         <button class="btn" onclick="addCla()">+ Add</button>
       </div>
     </div>
@@ -1311,6 +1312,53 @@ function parseLoot(text) {
   // Reverse each player's list so most recent loot appears first
   for (const key in loot) loot[key].reverse();
   return loot;
+}
+
+const GITHUB_REPO = 'bunzosteele/dbs-lc';
+const GITHUB_FILE = 'cla-sheets.json';
+let githubToken = sessionStorage.getItem('ghToken') || '';
+
+async function saveClaSheetsToGitHub() {
+  if (!githubToken) return; // no token, skip silently
+  try {
+    const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/contents/${GITHUB_FILE}`;
+    // Get current file SHA (needed for update)
+    let sha = null;
+    try {
+      const getRes = await fetch(apiUrl, {
+        headers: { Authorization: `token ${githubToken}`, Accept: 'application/vnd.github.v3+json' }
+      });
+      if (getRes.ok) {
+        const fileData = await getRes.json();
+        sha = fileData.sha;
+      }
+    } catch(e) {}
+
+    const body = {
+      message: `Update CLA sheets - ${new Date().toLocaleDateString()}`,
+      content: btoa(JSON.stringify(claSheets, null, 2)),
+      ...(sha ? { sha } : {})
+    };
+
+    const putRes = await fetch(apiUrl, {
+      method: 'PUT',
+      headers: {
+        Authorization: `token ${githubToken}`,
+        Accept: 'application/vnd.github.v3+json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(body)
+    });
+
+    if (putRes.ok) {
+      setHint('✓ Saved to GitHub!', 'success');
+    } else {
+      const err = await putRes.json();
+      setHint(`GitHub save failed: ${err.message}`, 'error');
+    }
+  } catch(e) {
+    setHint(`GitHub save error: ${e.message}`, 'error');
+  }
 }
 
 const APPS_SCRIPT = 'https://script.google.com/macros/s/AKfycbwewgQ14fY_34nK0HpKRt2YuVy2FLQZmfu-FrjraGQa55I5oKmYk7p_X3zsswxZAPU4/exec';
@@ -2025,25 +2073,37 @@ function addCla() {
   const url = document.getElementById('claUrl').value.trim();
   const gearGid = document.getElementById('claGearGid').value.trim();
   const buffGid = document.getElementById('claBuffGid').value.trim();
+  const token = document.getElementById('claToken').value.trim();
   if (!label || !url || !gearGid || !buffGid) {
     alert('Please fill in all fields.');
     return;
   }
   const sheetId = extractSheetId(url);
   if (!sheetId) { alert('Could not parse Sheet ID from URL.'); return; }
+
+  // Store token in session if provided
+  if (token) {
+    githubToken = token;
+    try { sessionStorage.setItem('ghToken', token); } catch(e) {}
+  }
+
   claSheets.push({ label, url, sheetId, gearGid, buffGid });
   saveClaSheets();
   renderClaList();
+  saveClaSheetsToGitHub();
+
   document.getElementById('claLabel').value = '';
   document.getElementById('claUrl').value = '';
   document.getElementById('claGearGid').value = '';
   document.getElementById('claBuffGid').value = '';
+  document.getElementById('claToken').value = '';
 }
 
 function removeCla(i) {
   claSheets.splice(i, 1);
   saveClaSheets();
   renderClaList();
+  saveClaSheetsToGitHub();
 }
 
 async function fetchAllClaData() {
@@ -2155,7 +2215,10 @@ async function loadClaSheetsFromRepo() {
     // Not on GitHub Pages or file missing — ignore
   }
 }
-loadClaSheetsFromRepo();
+loadClaSheetsFromRepo().then(() => {
+  // Auto-fetch data once page and CLA sheets are ready
+  fetchData();
+});
 
 // ── Custom Tooltip System ───────────────────────────────────────
 // Works on desktop (hover) and mobile (long-press)
