@@ -2384,6 +2384,16 @@ function onBossChange() {
   itemSel.disabled = false;
 }
 
+function lootSortArrow(col) {
+  return lootSortCol === col ? (lootSortDir === 'desc' ? ' ▾' : ' ▴') : ' ⬦';
+}
+
+function setLootSort(col) {
+  lootSortDir = lootSortCol === col ? (lootSortDir === 'desc' ? 'asc' : 'desc') : 'desc';
+  lootSortCol = col;
+  onItemChange();
+}
+
 function onItemChange() {
   const raid = document.getElementById('lootRaid').value;
   const boss = document.getElementById('lootBoss').value;
@@ -2580,18 +2590,8 @@ function onItemChange() {
     </tr>`;
   }
 
-  // Loot table sort helper
-  function lootSortArrow(col) {
-    return lootSortCol === col ? (lootSortDir === 'desc' ? ' ▾' : ' ▴') : ' ⬦';
-  }
-  function setLootSort(col) {
-    lootSortDir = lootSortCol === col ? (lootSortDir === 'desc' ? 'asc' : 'desc') : 'desc';
-    lootSortCol = col;
-    onItemChange(); // re-render
-  }
-
   const thS = (label, col, align='center') =>
-    `<th onclick="setLootSort('${col}')" style="cursor:pointer;text-align:${align};padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);" title="${col === 'priority' ? 'Loot priority recommendation based on raid attendance, consume usage, and loot received.' : col === 'points' ? 'Amount of loot received relative to raids attended.' : col === 'consumes' ? 'Uptime of all required consumables.' : col === 'attendance' ? 'Raids attended.' : ''}">${label}<span class="sort-arrow">${lootSortArrow(col)}</span></th>`;
+    `<th onclick="setLootSort('${col}')" style="cursor:pointer;text-align:${align};padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);white-space:nowrap;" title="${col === 'priority' ? 'Loot priority recommendation based on raid attendance, consume usage, and loot received.' : col === 'points' ? 'Amount of loot received relative to raids attended.' : col === 'consumes' ? 'Uptime of all required consumables.' : col === 'attendance' ? 'Raids attended.' : ''}">${label}<span class="sort-arrow">${lootSortArrow(col)}</span></th>`;
 
   el.innerHTML = `
     <table style="width:100%;border-collapse:collapse;margin-top:24px;">
@@ -2599,7 +2599,7 @@ function onItemChange() {
         <col style="width:160px;"> <!-- Player -->
         <col style="width:70px;">  <!-- Priority -->
         <col style="width:24px;">  <!-- Gear flag -->
-        <col style="width:64px;">  <!-- Loot Score -->
+        <col style="width:80px;">  <!-- Loot Score -->
         <col style="width:80px;">  <!-- Consumes -->
         <col>                      <!-- Raids (dots) -->
         <col style="width:50px;">  <!-- # -->
