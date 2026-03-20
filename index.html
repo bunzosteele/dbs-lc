@@ -1103,22 +1103,31 @@
 
   <!-- BiS Browser Panel (authenticated only) -->
   <div id="bisPanel" style="display:none;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px;">
-      <span style="font-family:'Cinzel',serif;font-size:13px;letter-spacing:0.15em;color:var(--gold);">⚔ Best in Slot Browser</span>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <select id="bisPhaseSelect" onchange="renderBisPanel()" style="background:var(--bg-card);color:var(--text);border:1px solid var(--border);padding:4px 8px;font-size:12px;">
+    <div class="loot-selectors">
+      <div class="loot-select-group">
+        <label class="loot-select-label">Phase</label>
+        <select class="loot-select" id="bisPhaseSelect" onchange="onBisSpecChange()">
           <option value="1">Phase 1 (T4)</option>
           <option value="2">Phase 2 (T5)</option>
           <option value="3">Phase 3 (ZA)</option>
           <option value="4">Phase 4 (T6)</option>
           <option value="5">Phase 5 (SWP)</option>
         </select>
-        <select id="bisSpecSelect" onchange="renderBisPanel()" style="background:var(--bg-card);color:var(--text);border:1px solid var(--border);padding:4px 8px;font-size:12px;">
+      </div>
+      <div class="loot-select-group">
+        <label class="loot-select-label">Spec</label>
+        <select class="loot-select" id="bisSpecSelect" onchange="onBisSpecChange()">
           <option value="">— Select Spec —</option>
         </select>
       </div>
+      <div class="loot-select-group">
+        <label class="loot-select-label">Slot</label>
+        <select class="loot-select" id="bisSlotSelect" onchange="renderBisPanel()" disabled>
+          <option value="">— Select Slot —</option>
+        </select>
+      </div>
     </div>
-    <div id="bisContent" style="color:var(--text-dim);font-style:italic;font-size:13px;">Select a spec to browse BiS lists.</div>
+    <div id="bisContent" style="color:var(--text-dim);font-style:italic;font-size:13px;">Select a spec and slot to browse BiS items.</div>
   </div>
 
   <!-- GitHub auth footer (shown when not authenticated) -->
@@ -3096,6 +3105,22 @@ const BIS_SPEC_LABELS = {
 const BIS_SLOT_ORDER = ['Head','Neck','Shoulders','Back','Chest','Wrist','Hands','Waist',
   'Legs','Feet','Ring','Trinket','Main Hand','One Hand','Off Hand','Two Hand','Ranged'];
 
+// Get display name for an item ID — uses stored name, falls back to ID
+function getBisItemName(id) {
+  for (const [key, val] of Object.entries(gearItemIds)) {
+    const entryId = typeof val === 'object' ? val.id : val;
+    if (entryId === id) {
+      // _bis_ keys have no real name, real keys are normalized names
+      if (key.startsWith('_bis_')) return null;
+      // Convert normalized name back to title case using stored name field if present
+      if (typeof val === 'object' && val.name) return val.name;
+      // Reconstruct from normalized key — not great, but tooltip will show real name
+      return null;
+    }
+  }
+  return null;
+}
+
 function initBisPanel() {
   const specSel = document.getElementById('bisSpecSelect');
   if (specSel.options.length <= 1) {
@@ -3110,65 +3135,87 @@ function initBisPanel() {
   renderBisPanel();
 }
 
+function onBisSpecChange() {
+  const spec = document.getElementById('bisSpecSelect').value;
+  const phase = parseInt(document.getElementById('bisPhaseSelect').value) || 1;
+  const slotSel = document.getElementById('bisSlotSelect');
+  const prevSlot = slotSel.value;
+
+  // Repopulate slot dropdown for this spec/phase
+  slotSel.innerHTML = '<option value="">— Select Slot —</option>';
+  if (spec && bisData[spec]) {
+    const availableSlots = Object.keys(bisData[spec])
+      .filter(slot => bisData[spec][slot].some(([id,rank,p]) => p === phase))
+      .sort((a,b) => {
+        const ai = BIS_SLOT_ORDER.indexOf(a), bi = BIS_SLOT_ORDER.indexOf(b);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+      });
+    availableSlots.forEach(slot => {
+      const opt = document.createElement('option');
+      opt.value = slot;
+      opt.textContent = slot;
+      slotSel.appendChild(opt);
+    });
+    slotSel.disabled = false;
+    // Restore previous slot if still valid
+    if (prevSlot && availableSlots.includes(prevSlot)) slotSel.value = prevSlot;
+  } else {
+    slotSel.disabled = true;
+  }
+  renderBisPanel();
+}
+
 function renderBisPanel() {
   const spec = document.getElementById('bisSpecSelect').value;
   const phase = parseInt(document.getElementById('bisPhaseSelect').value) || 1;
+  const slot = document.getElementById('bisSlotSelect').value;
   const el = document.getElementById('bisContent');
-  if (!spec) { el.innerHTML = '<span style="color:var(--text-dim);font-style:italic;">Select a spec to browse BiS lists.</span>'; return; }
-  if (!bisData[spec]) { el.innerHTML = '<span style="color:var(--text-dim);">No data for this spec.</span>'; return; }
 
-  const slots = bisData[spec];
-  // Get all slots that have entries for this phase
-  const slotEntries = {};
-  for (const [slot, items] of Object.entries(slots)) {
-    const phaseItems = items.filter(([id, rank, p]) => p === phase);
-    if (phaseItems.length) slotEntries[slot] = phaseItems.sort((a,b) => a[1]-b[1]);
+  if (!spec || !slot) {
+    el.innerHTML = '<span style="color:var(--text-dim);font-style:italic;">Select a spec and slot to browse BiS items.</span>';
+    return;
   }
-
-  if (!Object.keys(slotEntries).length) {
-    el.innerHTML = '<span style="color:var(--text-dim);">No BiS data for this spec in this phase.</span>';
+  if (!bisData[spec]?.[slot]) {
+    el.innerHTML = '<span style="color:var(--text-dim);">No BiS data for this spec/slot/phase.</span>';
     return;
   }
 
-  // Sort slots by BIS_SLOT_ORDER
-  const sortedSlots = Object.keys(slotEntries).sort((a,b) => {
-    const ai = BIS_SLOT_ORDER.indexOf(a), bi = BIS_SLOT_ORDER.indexOf(b);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
+  const items = bisData[spec][slot]
+    .filter(([id,rank,p]) => p === phase)
+    .sort((a,b) => a[1]-b[1]);
+
+  if (!items.length) {
+    el.innerHTML = '<span style="color:var(--text-dim);">No items for this spec/slot in this phase.</span>';
+    return;
+  }
 
   let html = `<table style="width:100%;border-collapse:collapse;">
     <thead><tr style="border-bottom:1px solid var(--border);">
-      <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);">Slot</th>
-      <th style="text-align:center;padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);">Rank</th>
+      <th style="text-align:center;padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);width:60px;">Rank</th>
       <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);">Item</th>
-      <th style="text-align:right;padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);">EPV</th>
+      <th style="text-align:right;padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);width:80px;">EPV</th>
     </tr></thead><tbody>`;
 
-  let lastSlot = '';
-  for (const slot of sortedSlots) {
-    for (const [id, rank, p, epv100] of slotEntries[slot]) {
-      const entry = Object.values(gearItemIds).find(v => (typeof v === 'object' ? v.id : v) === id);
-      const icon = entry?.icon ? `<img src="https://wow.zamimg.com/images/wow/icons/small/${entry.icon}.jpg" style="width:18px;height:18px;border:1px solid #444;border-radius:2px;vertical-align:middle;margin-right:6px;flex-shrink:0;">` : '';
-      const name = Object.entries(gearItemIds).find(([k,v]) => (typeof v === 'object' ? v.id : v) === id)?.[0]?.replace(/^_bis_\d+$/, '') || `Item #${id}`;
-      const displayName = name.startsWith('_bis_') ? `Item #${id}` : name.replace(/([a-z])([A-Z])/g, '$1 $2');
-      const epv = (epv100/100).toFixed(1);
-      const rankColor = rank === 1 ? 'var(--gold)' : rank <= 3 ? '#8abf50' : 'var(--text)';
-      const slotLabel = slot !== lastSlot ? slot : '';
-      lastSlot = slot;
-      const isOurs = entry && typeof entry === 'object' && entry.id && !Object.keys(gearItemIds).find(k => k.startsWith('_bis_') && gearItemIds[k]?.id === id);
+  for (const [id, rank, p, epv100] of items) {
+    const entry = Object.values(gearItemIds).find(v => (typeof v === 'object' ? v.id : v) === id);
+    const icon = entry?.icon
+      ? `<img src="https://wow.zamimg.com/images/wow/icons/small/${entry.icon}.jpg" style="width:18px;height:18px;border:1px solid #444;border-radius:2px;vertical-align:middle;flex-shrink:0;">`
+      : '<span style="display:inline-block;width:18px;height:18px;background:var(--border);border-radius:2px;vertical-align:middle;flex-shrink:0;"></span>';
+    const displayName = entry?.name || `Item #${id}`;
+    const epv = (epv100/100).toFixed(1);
+    const rankColor = rank === 1 ? 'var(--gold)' : rank <= 3 ? '#8abf50' : 'var(--text)';
+    const rankDisplay = rank === 1 ? '★' : rank;
 
-      html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
-        <td style="padding:5px 12px;font-size:11px;color:var(--text-dim);white-space:nowrap;">${slotLabel}</td>
-        <td style="padding:5px 12px;text-align:center;font-family:'Cinzel',serif;font-size:12px;color:${rankColor};font-weight:${rank===1?'700':'400'};">${rank === 1 ? '★' : rank}</td>
-        <td style="padding:5px 12px;">
-          <a href="https://www.wowhead.com/tbc/item=${id}" data-wowhead="item=${id}&dataset=tbc" target="_blank" rel="noopener"
-             style="display:inline-flex;align-items:center;text-decoration:none;color:var(--gold-light);font-size:14px;">
-            ${icon}${name.replace(/_bis_\d+/,'Item #'+id)}
-          </a>
-        </td>
-        <td style="padding:5px 12px;text-align:right;font-size:12px;color:var(--text-dim);">${epv}</td>
-      </tr>`;
-    }
+    html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+      <td style="padding:6px 12px;text-align:center;font-family:'Cinzel',serif;font-size:13px;color:${rankColor};font-weight:${rank===1?'700':'400'};">${rankDisplay}</td>
+      <td style="padding:6px 12px;">
+        <a href="https://www.wowhead.com/tbc/item=${id}" data-wowhead="item=${id}&dataset=tbc" target="_blank" rel="noopener"
+           style="display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:var(--gold-light);font-size:15px;">
+          ${icon}${displayName}
+        </a>
+      </td>
+      <td style="padding:6px 12px;text-align:right;font-size:12px;color:var(--text-dim);">${epv}</td>
+    </tr>`;
   }
   html += '</tbody></table>';
   el.innerHTML = html;
@@ -3176,6 +3223,29 @@ function renderBisPanel() {
   if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) {
     setTimeout(() => $WowheadPower.refreshLinks(), 100);
   }
+}
+
+// Refresh slot options when phase changes without resetting spec
+function onBisSpecChangePhase(phase) {
+  const spec = document.getElementById('bisSpecSelect').value;
+  const slotSel = document.getElementById('bisSlotSelect');
+  const currentSlot = slotSel.value;
+  if (!spec || !bisData[spec]) return;
+  const availableSlots = Object.keys(bisData[spec])
+    .filter(slot => bisData[spec][slot].some(([id,rank,p]) => p === phase))
+    .sort((a,b) => {
+      const ai = BIS_SLOT_ORDER.indexOf(a), bi = BIS_SLOT_ORDER.indexOf(b);
+      return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    });
+  slotSel.innerHTML = '<option value="">— Select Slot —</option>';
+  availableSlots.forEach(slot => {
+    const opt = document.createElement('option');
+    opt.value = slot;
+    opt.textContent = slot;
+    slotSel.appendChild(opt);
+  });
+  slotSel.disabled = false;
+  if (currentSlot && availableSlots.includes(currentSlot)) slotSel.value = currentSlot;
 }
 
 // ── Custom Tooltip System ───────────────────────────────────────
