@@ -1553,11 +1553,8 @@ async function exchangeWclCode(code) {
     code_verifier: verifier
   }));
   const rawUrl = APPS_SCRIPT + '?action=wclAuth&payload=' + encodeURIComponent(payload);
-  const url = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(rawUrl)}`;
   try {
-    const res = await fetch(url);
-    if (!res.ok) { console.warn('Token exchange HTTP error:', res.status); return null; }
-    const text = await res.text();
+    const text = await proxyFetch(rawUrl);
     let data;
     try { data = JSON.parse(text); } catch(e) { console.warn('Token parse error:', text); return null; }
     if (data.error) { console.warn('Token exchange error:', data); return null; }
@@ -1677,10 +1674,7 @@ async function wclFetch(url) {
 async function wclGraphQL(query, token) {
   const q = btoa(unescape(encodeURIComponent(query)));
   const rawUrl = APPS_SCRIPT + '?action=wclQuery&q=' + encodeURIComponent(q) + '&token=' + encodeURIComponent(token);
-  const proxyUrl = 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(rawUrl);
-  const res = await fetch(proxyUrl);
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  const text = await res.text();
+  const text = await proxyFetch(rawUrl);
   return JSON.parse(text);
 }
 
@@ -1699,15 +1693,17 @@ async function fetchWclAllStars(realm) {
   }`;
   try {
     // First get the current TBC phase zone ID
-    const zoneData = await wclGraphQL(query, token).catch(() => null);
-    if (!zoneData) return;
+    const zoneData = await wclGraphQL(query, token).catch(e => { console.warn('Zone query failed:', e); return null; });
+    console.log('WCL zone data:', JSON.stringify(zoneData)?.slice(0, 200));
+    if (!zoneData) { console.warn('No zone data returned'); return; }
     const zones = zoneData?.data?.worldData?.expansion?.zones || [];
-    if (!zones.length) return;
-    // Use most recent zone (highest id)
+    console.log('WCL zones:', zones.length, zones.map(z => z.id + ':' + z.name).join(', '));
+    if (!zones.length) { console.warn('No zones found'); return; }
     const zone = zones[zones.length - 1];
+    console.log('Using zone:', zone.id, zone.name);
 
-    // Now fetch all stars for each player
     const players = lastRenderData.roles.flatMap(r => r.players).filter(p => p.name && p.pct !== null);
+    console.log('Fetching WCL for', players.length, 'players');
     await Promise.all(players.map(async p => {
       const charQuery = `{
         characterData {
@@ -1717,10 +1713,10 @@ async function fetchWclAllStars(realm) {
         }
       }`;
       try {
-        const charData = await wclGraphQL(charQuery, token).catch(() => null);
+        const charData = await wclGraphQL(charQuery, token).catch(e => { console.warn('Char query failed for', p.name, e); return null; });
         if (!charData) return;
         const rankings = charData?.data?.characterData?.character?.zoneRankings;
-        if (!rankings) return;
+        if (!rankings) { console.warn('No rankings for', p.name, JSON.stringify(charData)?.slice(0, 200)); return; }
         const key = normalizeName(p.name);
         wclData[key] = {
           points: rankings.allStars?.[0]?.points ?? null,
@@ -1729,10 +1725,11 @@ async function fetchWclAllStars(realm) {
           bestPerf: rankings.bestPerformanceAverage ?? null,
           medianPerf: rankings.medianPerformanceAverage ?? null,
         };
-      } catch(e) {}
+        console.log('WCL data for', p.name, ':', JSON.stringify(wclData[key]));
+      } catch(e) { console.warn('WCL char error for', p.name, e); }
     }));
 
-    // Re-render to show WCL data
+    console.log('WCL fetch complete, re-rendering');
     if (lastRenderData.roles.length) render(lastRenderData);
   } catch(e) { console.warn('WCL fetch failed:', e.message); }
 }
@@ -1794,11 +1791,27 @@ const APPS_SCRIPT = 'https://script.google.com/macros/s/AKfycbzbZfJgF_nNR3-l0fao
 const ICON_SCRIPT = 'https://script.google.com/macros/s/AKfycbyBs6sgRoX6Zy3a3lq9q6fR4o0spLHRfKc-G63Vy8JUBTQa2HFWhnP8MxFGm8JxjNo/exec';
 
 // Fetch a Google Sheet tab via Apps Script proxy
+async function proxyFetch(targetUrl) {
+  const proxies = [
+    u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
+    u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
+    u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+  ];
+  for (const proxy of proxies) {
+    try {
+      const res = await fetch(proxy(targetUrl));
+      if (res.ok) {
+        const text = await res.text();
+        if (text && text.length > 2) return text;
+      }
+    } catch(e) {}
+  }
+  throw new Error('All proxies failed for: ' + targetUrl);
+}
+
 async function fetchSheet(sheetId, gid) {
-  const url = `${APPS_SCRIPT}?sheetId=${sheetId}&gid=${gid}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const text = await res.text();
+  const rawUrl = APPS_SCRIPT + '?sheetId=' + sheetId + '&gid=' + gid;
+  const text = await proxyFetch(rawUrl);
   if (!text.trim() || !text.includes(',')) throw new Error('Response does not look like CSV');
   return text;
 }
