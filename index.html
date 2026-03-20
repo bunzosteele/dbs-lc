@@ -2570,8 +2570,7 @@ const GEAR_LISTING_SLOTS = ['Head','Neck','Shoulders','Cloak','Chest','Bracers',
 
 // Parse gear listing CSV -> { playerName: { Head: 'itemname', Neck: 'itemname', ... } }
 function parseGearListing(csvText) {
-  const rows = csvText.split('
-').map(r => {
+  const rows = csvText.split('\n').map(r => {
     const cols = [];
     let cur = '', inQ = false;
     for (const ch of r) {
