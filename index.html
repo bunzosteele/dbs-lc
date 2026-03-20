@@ -1527,7 +1527,7 @@ async function generateCodeChallenge(verifier) {
 async function startWclPkce() {
   const verifier = generateRandomString(64);
   const challenge = await generateCodeChallenge(verifier);
-  sessionStorage.setItem('wclVerifier', verifier);
+  localStorage.setItem('wclVerifier', verifier);
   const params = new URLSearchParams({
     client_id: WCL_CLIENT_ID,
     redirect_uri: WCL_REDIRECT_URI,
@@ -1540,21 +1540,24 @@ async function startWclPkce() {
 }
 
 async function exchangeWclCode(code) {
-  const verifier = sessionStorage.getItem('wclVerifier');
+  const verifier = localStorage.getItem('wclVerifier');
   if (!verifier) { console.warn('No PKCE verifier found in session'); return null; }
   // Route through Apps Script to avoid CORS on token endpoint
-  const url = APPS_SCRIPT + '?action=wclAuth'
-    + '&grant_type=authorization_code'
-    + '&client_id=' + encodeURIComponent(WCL_CLIENT_ID)
-    + '&redirect_uri=' + encodeURIComponent(WCL_REDIRECT_URI)
-    + '&code=' + encodeURIComponent(code)
-    + '&code_verifier=' + encodeURIComponent(verifier);
+  // Encode all params as base64 JSON to keep URL short and avoid length issues
+  const payload = btoa(JSON.stringify({
+    grant_type: 'authorization_code',
+    client_id: WCL_CLIENT_ID,
+    redirect_uri: WCL_REDIRECT_URI,
+    code,
+    code_verifier: verifier
+  }));
+  const url = APPS_SCRIPT + '?action=wclAuth&payload=' + encodeURIComponent(payload);
   try {
     const res = await fetch(url);
     if (!res.ok) { console.warn('Token exchange HTTP error:', res.status); return null; }
     const data = await res.json();
     if (data.error) { console.warn('Token exchange error:', data); return null; }
-    sessionStorage.removeItem('wclVerifier');
+    localStorage.removeItem('wclVerifier');
     return data;
   } catch(e) { console.warn('Token exchange failed:', e.message); return null; }
 }
@@ -1572,7 +1575,7 @@ async function handleWclCallback() {
   sessionStorage.setItem('wclToken', wclToken);
   sessionStorage.setItem('wclTokenExpiry', String(wclTokenExpiry));
   setWclStatus('✓ Connected to WarcraftLogs!', 'success');
-  const realm = sessionStorage.getItem('wclRealm') || '';
+  const realm = sessionStorage.getItem('wclRealm') || localStorage.getItem('wclRealm') || '';
   if (realm) fetchWclAllStars(realm);
   return true;
 }
@@ -1781,7 +1784,7 @@ async function saveClaSheetsToGitHub() {
   }
 }
 
-const APPS_SCRIPT = 'https://script.google.com/macros/s/AKfycbxtimyZnxTFRxiU1tRaAA_6XHQyrf3u4KcsS-cBnKEzWiEXwpTCdJzgDqEgYiaVbKd8/exec';
+const APPS_SCRIPT = 'https://script.google.com/macros/s/AKfycbwzzO52MccmwGFYDfoZTr_5VvtJvtfee7zb5i5Bco82w1rKuBod7v82JGg8qDi8bose/exec';
 const ICON_SCRIPT = 'https://script.google.com/macros/s/AKfycbyBs6sgRoX6Zy3a3lq9q6fR4o0spLHRfKc-G63Vy8JUBTQa2HFWhnP8MxFGm8JxjNo/exec';
 
 // Fetch a Google Sheet tab via Apps Script proxy
@@ -2372,7 +2375,7 @@ function render({ dates, roles }) {
   `;
 
   out.innerHTML = html;
-  setTimeout(() => { if (typeof $WowheadPower !== 'undefined') { $WowheadPower.init(); } }, 200);
+  setTimeout(() => { if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks(); }, 200);
 }
 
 function toggleLoot(td, playerName) {
@@ -2425,7 +2428,7 @@ function toggleLoot(td, playerName) {
 
   html += `</td>`;
   lootTr.innerHTML = html;
-  setTimeout(() => { if (typeof $WowheadPower !== 'undefined') $WowheadPower.init(); }, 200);
+  setTimeout(() => { if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks(); }, 200);
 
   tr.after(lootTr);
   arrow.textContent = '▾';
@@ -2462,7 +2465,7 @@ function extractSheetId(url) {
 function connectWcl() {
   const realm = document.getElementById('wclRealm').value.trim();
   if (!realm) { setWclStatus('Enter your realm name first.', 'error'); return; }
-  sessionStorage.setItem('wclRealm', realm);
+  localStorage.setItem('wclRealm', realm); sessionStorage.setItem('wclRealm', realm);
   startWclPkce();
 }
 
@@ -3205,7 +3208,7 @@ function onItemChange() {
     </table>
     <p style="margin-top:12px;font-size:13px;color:var(--text-dim);font-style:italic;">${needIt.length} eligible · ${haveIt.length} already received · ${inactiveNeedIt.length} inactive</p>
   `;
-  setTimeout(() => { if (typeof $WowheadPower !== 'undefined') $WowheadPower.init(); }, 200);
+  setTimeout(() => { if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks(); }, 200);
 }
 
 </script>
