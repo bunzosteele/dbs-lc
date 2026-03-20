@@ -1722,11 +1722,12 @@ async function fetchWclAllStars(realm) {
           }
         }`;
         try {
-          const charData = await wclGraphQL(charQuery, token).catch(e => { console.warn('Char query failed for', wclName, e); return null; });
-          if (!charData) {
-            updateWclCell(normalizeName(p.name), null);
-            return;
-          }
+          const charData = await wclGraphQL(charQuery, token).catch(e => {
+            console.warn('Char query failed for', wclName, e);
+            updateWclCell(normalizeName(p.name), null, wclName);
+            return null;
+          });
+          if (!charData) return;
           const char = charData?.data?.characterData?.character;
           const rankings = char?.zoneRankings;
           if (!rankings) { console.warn('No rankings for', p.name, JSON.stringify(charData)?.slice(0, 200)); updateWclCell(normalizeName(p.name), null); return; }
@@ -1769,17 +1770,21 @@ async function fetchWclAllStars(realm) {
 }
 
 function wclCellHtml(wcl, playerName) {
-  if (wcl === null) return '<span style="color:var(--text-dim);font-size:11px;">—</span>'; // explicit failure
-  if (!wcl || wcl.medianPerf === null || wcl.medianPerf === undefined) return '<span style="color:var(--text-dim);font-size:11px;">—</span>';
-  const col = wclColor(wcl.medianPerf);
   const wclName = (playerName ? (canonicalNames[normalizeName(playerName)] || playerName) : '').toLowerCase();
-  const href = `https://fresh.warcraftlogs.com/character/us/dreamscythe/${encodeURIComponent(wclName)}`;
-  return `<a href="${href}" target="_blank" rel="noopener" style="color:${col};font-family:'Cinzel',serif;font-size:12px;font-weight:600;text-decoration:none;">${Math.round(wcl.medianPerf)}%</a>`;
+  const href = wclName ? `https://fresh.warcraftlogs.com/character/us/dreamscythe/${encodeURIComponent(wclName)}` : null;
+  const link = (inner, style) => href
+    ? `<a href="${href}" target="_blank" rel="noopener" style="text-decoration:none;${style}">${inner}</a>`
+    : `<span style="${style}">${inner}</span>`;
+  if (wcl === null) return link('—', 'color:var(--text-dim);font-size:11px;'); // explicit failure
+  if (!wcl || wcl.medianPerf === null || wcl.medianPerf === undefined) return link('—', 'color:var(--text-dim);font-size:11px;');
+  const col = wclColor(wcl.medianPerf);
+  return link(`${Math.round(wcl.medianPerf)}%`, `color:${col};font-family:'Cinzel',serif;font-size:12px;font-weight:600;`);
 }
 
-function updateWclCell(key, entry) {
+function updateWclCell(key, entry, playerName) {
+  const name = playerName || key;
   document.querySelectorAll(`[data-wcl-key="${key}"]`).forEach(td => {
-    td.innerHTML = wclCellHtml(entry, key);
+    td.innerHTML = wclCellHtml(entry, name);
   });
 }
 
@@ -2286,7 +2291,11 @@ function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, point
           })()}">${pts}</td>
           <td style="text-align:center;" class="wcl-col" data-wcl-key="${normalizeName(p.name)}">${(() => {
             const wcl = wclData[normalizeName(p.name)];
-            if (!wcl || wcl.medianPerf === null || wcl.medianPerf === undefined) return '<span class="wcl-spinner"></span>';
+            if (!wcl || wcl.medianPerf === null || wcl.medianPerf === undefined) {
+              const sName = (canonicalNames[normalizeName(p.name)] || p.name).toLowerCase();
+              const sHref = `https://fresh.warcraftlogs.com/character/us/dreamscythe/${encodeURIComponent(sName)}`;
+              return `<a href="${sHref}" target="_blank" rel="noopener" style="text-decoration:none;"><span class="wcl-spinner"></span></a>`;
+            }
             return wclCellHtml(wcl, p.name);
           })()}</td>
           <td class="consumes-cell">${(() => {
@@ -3212,7 +3221,12 @@ function onItemChange() {
       <td class="priority-cell" style="color:${prCol};" title="${fullTooltip}">${prStr !== '—' ? `<span class="priority-score" style="color:${prCol};">${prStr}</span>` : '<span style="color:var(--text-dim);font-style:italic;font-size:12px;">—</span>'}</td>
       <td class="gear-flag-cell">${gearHtml}</td>
       <td class="points-cell" style="color:${ptsCol};text-align:center;">${pts}</td>
-      <td style="text-align:center;" class="wcl-col" data-wcl-key="${key}">${wclCellHtml(wclData[key], p.name) || '<span class="wcl-spinner"></span>'}</td>
+      <td style="text-align:center;" class="wcl-col" data-wcl-key="${key}">${(() => {
+        const _w = wclData[key];
+        if (_w) return wclCellHtml(_w, p.name);
+        const _n = (canonicalNames[normalizeName(p.name)] || p.name).toLowerCase();
+        return `<a href="https://fresh.warcraftlogs.com/character/us/dreamscythe/${encodeURIComponent(_n)}" target="_blank" rel="noopener" style="text-decoration:none;"><span class="wcl-spinner"></span></a>`;
+      })()}</td>
       <td class="consumes-cell" style="text-align:center;">${conStr}</td>
       <td>${dotsHtml}</td>
       <td class="att-count" style="text-align:right;">${p.attended}</td>
