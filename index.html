@@ -1577,9 +1577,7 @@ async function handleWclCallback() {
   sessionStorage.setItem('wclToken', wclToken);
   sessionStorage.setItem('wclTokenExpiry', String(wclTokenExpiry));
   setWclStatus('✓ Connected to WarcraftLogs!', 'success');
-  const realm = WCL_REALM;
-  if (realm) fetchWclAllStars(realm);
-  return true;
+  return true; // fetchWclAllStars will be called after fetchData() completes
 }
 
 const WCL_CLIENT_ID = 'a1577bef-44fb-4fb3-87f6-555c24400a38';
@@ -2010,8 +2008,8 @@ function getSortedPlayers(role, players, bottom20threshold, top20threshold, poin
     } else if (col === 'pct') {
       av = a.pct ?? -1; bv = b.pct ?? -1;
     } else if (col === 'wcl') {
-      av = wclData[normalizeName(a.name)]?.points ?? -1;
-      bv = wclData[normalizeName(b.name)]?.points ?? -1;
+      av = wclData[normalizeName(a.name)]?.medianPerf ?? -1;
+      bv = wclData[normalizeName(b.name)]?.medianPerf ?? -1;
     } else { // attendance (count)
       av = a.attended; bv = b.attended;
     }
@@ -2229,11 +2227,10 @@ function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, point
           })()}">${pts}</td>
           <td style="text-align:center;">${(() => {
             const wcl = wclData[normalizeName(p.name)];
-            if (!wcl || wcl.points === null) return '<span style="color:var(--text-dim);font-size:11px;">—</span>';
-            const pct = wcl.rank && wcl.outOf ? Math.round((1 - (wcl.rank - 1) / wcl.outOf) * 100) : null;
-            const col = wclColor(pct);
-            const tip = `Points: ${Math.round(wcl.points)}${wcl.rank ? ` | Rank: ${wcl.rank}/${wcl.outOf}` : ''}${wcl.bestPerf ? ` | Best: ${Math.round(wcl.bestPerf)}%` : ''}`;
-            return `<span style="color:${col};font-family:'Cinzel',serif;font-size:12px;font-weight:600;" title="${tip}">${Math.round(wcl.points)}</span>`;
+            if (!wcl || wcl.medianPerf === null || wcl.medianPerf === undefined) return '<span style="color:var(--text-dim);font-size:11px;">—</span>';
+            const col = wclColor(wcl.medianPerf);
+            const tip = `Median: ${Math.round(wcl.medianPerf)}%${wcl.bestPerf !== null ? ` | Best: ${Math.round(wcl.bestPerf)}%` : ''}${wcl.points !== null ? ` | All Stars: ${Math.round(wcl.points)}` : ''}`;
+            return `<span style="color:${col};font-family:'Cinzel',serif;font-size:12px;font-weight:600;" title="${tip}">${Math.round(wcl.medianPerf)}%</span>`;
           })()}</td>
           <td class="consumes-cell">${(() => {
             const scores = Object.values(buffScoreByPlayerDate[normalizeName(p.name)] || {}).map(v => v?.total).filter(v => v !== null);
@@ -2351,7 +2348,7 @@ function render({ dates, roles }) {
             <th data-col="priority" onclick="setSort('${roleSafeId}', '${role.name}', 'priority')" style="cursor:pointer;text-align:center;" title="Loot priority recommendation based on raid attendance, consume usage, and loot received.">Priority<span class="sort-arrow">${state.col==='priority' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
             <th></th>
             <th data-col="points" onclick="setSort('${roleSafeId}', '${role.name}', 'points')" style="cursor:pointer;text-align:center;" title="Amount of loot received relative to raids attended.">Loot Score<span class="sort-arrow">${state.col==='points' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
-            <th data-col="wcl" onclick="setSort('${roleSafeId}', '${role.name}', 'wcl')" style="cursor:pointer;text-align:center;" title="WarcraftLogs All Stars points for current tier.">WCL<span class="sort-arrow">${state.col==='wcl' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
+            <th data-col="wcl" onclick="setSort('${roleSafeId}', '${role.name}', 'wcl')" style="cursor:pointer;text-align:center;" title="WarcraftLogs median parse % for current tier.">WCL<span class="sort-arrow">${state.col==='wcl' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
             <th data-col="consumes" onclick="setSort('${roleSafeId}', '${role.name}', 'consumes')" style="cursor:pointer;text-align:center;" title="Uptime of all required consumables.">Consumes<span class="sort-arrow">${state.col==='consumes' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
             <th style="text-align:center;" title="Raids attended. Color indicates consumable usage.">Raids</th>
             <th data-col="attendance" onclick="setSort('${roleSafeId}', '${role.name}', 'attendance')" style="cursor:pointer;text-align:center;">#<span class="sort-arrow">${state.col==='attendance' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
@@ -2734,13 +2731,10 @@ loadClaSheetsFromRepo().then(async () => {
   // Handle PKCE callback first (page may have been redirected back from WarcraftLogs)
   const wasCallback = await handleWclCallback();
   await fetchData();
-  // Auto-fetch WCL if token already in session
-  if (!wasCallback) {
-    const token = await getWclToken();
-    const realm = WCL_REALM;
-    if (token && realm) {
-      fetchWclAllStars(realm);
-    }
+  // Always try to fetch WCL after data is loaded (callback or existing token)
+  const token = await getWclToken();
+  if (token) {
+    fetchWclAllStars(WCL_REALM);
   }
 });
 
@@ -3063,6 +3057,7 @@ function onItemChange() {
   function getLootSortVal(p, col) {
     if (col === 'priority') return lootPriorityScore(p);
     if (col === 'points')   return pointsByPlayer[normalizeName(p.name)] ?? 0;
+    if (col === 'wcl')      return wclData[normalizeName(p.name)]?.medianPerf ?? -1;
     if (col === 'consumes') {
       const sc = Object.values(buffScoreByPlayerDate[normalizeName(p.name)] || {}).map(v => v?.total).filter(v => v !== null);
       return sc.length ? sc.reduce((a,b)=>a+b,0)/sc.length : -1;
@@ -3173,6 +3168,13 @@ function onItemChange() {
       <td class="priority-cell" style="color:${prCol};" title="${fullTooltip}">${prStr !== '—' ? `<span class="priority-score" style="color:${prCol};">${prStr}</span>` : '<span style="color:var(--text-dim);font-style:italic;font-size:12px;">—</span>'}</td>
       <td class="gear-flag-cell">${gearHtml}</td>
       <td class="points-cell" style="color:${ptsCol};text-align:center;">${pts}</td>
+      <td style="text-align:center;">${(() => {
+        const wcl = wclData[key];
+        if (!wcl || wcl.medianPerf === null || wcl.medianPerf === undefined) return '<span style="color:var(--text-dim);font-size:11px;">—</span>';
+        const wclCol = wclColor(wcl.medianPerf);
+        const tip = `Median: ${Math.round(wcl.medianPerf)}%${wcl.bestPerf !== null ? ` | Best: ${Math.round(wcl.bestPerf)}%` : ''}${wcl.points !== null ? ` | All Stars: ${Math.round(wcl.points)}` : ''}`;
+        return `<span style="color:${wclCol};font-family:'Cinzel',serif;font-size:12px;font-weight:600;" title="${tip}">${Math.round(wcl.medianPerf)}%</span>`;
+      })()}</td>
       <td class="consumes-cell" style="text-align:center;">${conStr}</td>
       <td>${dotsHtml}</td>
       <td class="att-count" style="text-align:right;">${p.attended}</td>
@@ -3196,6 +3198,7 @@ function onItemChange() {
         <col style="width:70px;">  <!-- Priority -->
         <col style="width:24px;">  <!-- Gear flag -->
         <col style="width:80px;">  <!-- Loot Score -->
+        <col style="width:70px;">  <!-- WCL -->
         <col style="width:80px;">  <!-- Consumes -->
         <col>                      <!-- Raids (dots) -->
         <col style="width:50px;">  <!-- # -->
@@ -3207,6 +3210,7 @@ function onItemChange() {
           ${thS('Priority','priority')}
           <th style="padding:6px 12px;"></th>
           ${thS('Loot Score','points')}
+          ${thS('WCL','wcl')}
           ${thS('Consumes','consumes')}
           <th style="padding:6px 12px;text-align:center;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);" title="Raids attended. Color indicates consumable usage.">Raids</th>
           ${thS('#','attendance')}
