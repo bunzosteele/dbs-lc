@@ -986,6 +986,18 @@
     opacity: 1;
   }
 
+
+  body.wcl-hidden .wcl-col { display: none; }
+  @keyframes wcl-spin { to { transform: rotate(360deg); } }
+  .wcl-spinner {
+    display: inline-block;
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--gold-dim);
+    border-radius: 50%;
+    animation: wcl-spin 0.7s linear infinite;
+    vertical-align: middle;
+  }
 </style>
 <script>const whTooltips = {colorLinks: true, iconizeLinks: true, iconSize: 'small', rename: true, hide: {molt: true}, defaultZone: 'tbc'};</script>
 <script src="https://wow.zamimg.com/widgets/power.js"></script>
@@ -1000,6 +1012,7 @@
   <div class="controls">
     <button class="btn primary" onclick="fetchData()">⟳ Fetch Data</button>
     <button class="btn" id="wclConnectTopBtn" onclick="connectWcl()" style="display:none;">⚡ Connect WarcraftLogs</button>
+    <div id="wclStatus" style="font-size:12px;color:var(--text-dim);font-style:italic;"></div>
     <div class="group-btns">
       <button class="group-btn active" data-mode="role" onclick="setGrouping('role')">Role</button>
       <button class="group-btn" data-mode="t45" onclick="setGrouping('t45')">T4/5</button>
@@ -1063,14 +1076,7 @@
         <button class="btn primary" onclick="importCla()" style="margin-top:6px;">Import</button>
       </div>
       <div class="cla-add-form">
-        <div id="wclSettings" style="margin-bottom:12px;padding:10px 12px;border:1px solid var(--border);background:rgba(0,0,0,0.2);">
-          <div style="font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);margin-bottom:8px;">WARCRAFTLOGS</div>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <button class="btn" onclick="connectWcl()">Connect via WarcraftLogs</button>
-            <span style="font-size:12px;color:var(--text-dim);">Realm: Dreamscythe</span>
-          </div>
-          <div id="wclStatus" style="font-size:12px;color:var(--text-dim);margin-top:6px;font-style:italic;"></div>
-        </div>
+
         <input class="cla-input" id="claLabel" placeholder="Label (e.g. 2/26)" />
         <input class="cla-input wide" id="claUrl" placeholder="Google Sheet URL" />
         <input class="cla-input" id="claGearGid" placeholder="Gear Issues GID" />
@@ -1648,6 +1654,7 @@ function setWclStatus(msg, type = '') {
   if (el) { el.textContent = msg; el.style.color = type === 'error' ? 'var(--red)' : type === 'success' ? '#4caa6e' : 'var(--text-dim)'; }
   const topBtn = document.getElementById('wclConnectTopBtn');
   if (topBtn) topBtn.style.display = (type === 'success') ? 'none' : '';
+  document.body.classList.toggle('wcl-hidden', type !== 'success');
 }
 
 async function getWclToken() {
@@ -1690,44 +1697,65 @@ async function fetchWclAllStars(realm) {
       r.players.filter(p => p.name && p.pct !== null).map(p => ({ ...p, roleName: r.name }))
     );
     console.log('Fetching WCL for', players.length, 'players');
-    await Promise.all(players.map(async p => {
-      const wclName = canonicalNames[normalizeName(p.name)] || p.name;
-      const isHealer = p.roleName === 'Healers';
-      const metric = isHealer ? 'hps' : 'dps';
-      const charQuery = `{
-        characterData {
-          character(name: "${wclName}", serverSlug: "${realm}", serverRegion: "${WCL_REGION}") {
-            zoneRankings(zoneID: ${zone.id}, metric: ${metric})
+    // Process in batches of 5 to avoid rate-limiting proxies
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < players.length; i += BATCH_SIZE) {
+      const batch = players.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(async p => {
+        const wclName = canonicalNames[normalizeName(p.name)] || p.name;
+        const isHealer = p.roleName === 'Healers';
+        const metric = isHealer ? 'hps' : 'dps';
+        const charQuery = `{
+          characterData {
+            character(name: "${wclName}", serverSlug: "${realm}", serverRegion: "${WCL_REGION}") {
+              zoneRankings(zoneID: ${zone.id}, metric: ${metric})
+            }
           }
-        }
-      }`;
-      try {
-        const charData = await wclGraphQL(charQuery, token).catch(e => { console.warn('Char query failed for', wclName, e); return null; });
-        if (!charData) return;
-        const char = charData?.data?.characterData?.character;
-        console.log('Raw char data for', p.name, ':', JSON.stringify(charData)?.slice(0, 400));
-        const rankings = char?.zoneRankings;
-        if (!rankings) { console.warn('No rankings for', p.name, JSON.stringify(charData)?.slice(0, 200)); return; }
-        const key = normalizeName(p.name);
-        const entry = {
-          points: rankings.allStars?.[0]?.points ?? null,
-          rank: rankings.allStars?.[0]?.rank ?? null,
-          outOf: rankings.allStars?.[0]?.total ?? null,
-          bestPerf: rankings.bestPerformanceAverage ?? null,
-          medianPerf: rankings.medianPerformanceAverage ?? null,
-        };
-        // Sycamoore one-off: use best parse as median (healer median unreliable)
-        if (normalizeName(wclName) === 'sycamoore' && entry.bestPerf !== null) {
-          entry.medianPerf = entry.bestPerf;
-        }
-        wclData[key] = entry;
-        console.log('WCL data for', p.name, ':', JSON.stringify(wclData[key]));
-      } catch(e) { console.warn('WCL char error for', p.name, e); }
-    }));
+        }`;
+        try {
+          const charData = await wclGraphQL(charQuery, token).catch(e => { console.warn('Char query failed for', wclName, e); return null; });
+          if (!charData) return;
+          const char = charData?.data?.characterData?.character;
+          const rankings = char?.zoneRankings;
+          if (!rankings) { console.warn('No rankings for', p.name, JSON.stringify(charData)?.slice(0, 200)); return; }
+          const key = normalizeName(p.name);
+          const entry = {
+            points: rankings.allStars?.[0]?.points ?? null,
+            rank: rankings.allStars?.[0]?.rank ?? null,
+            outOf: rankings.allStars?.[0]?.total ?? null,
+            bestPerf: rankings.bestPerformanceAverage ?? null,
+            medianPerf: rankings.medianPerformanceAverage ?? null,
+          };
+          // Sycamoore one-off: use best parse as median (healer median unreliable)
+          if (normalizeName(wclName) === 'sycamoore' && entry.bestPerf !== null) {
+            entry.medianPerf = entry.bestPerf;
+          }
+          wclData[key] = entry;
+          updateWclCell(key, entry);
+        } catch(e) { console.warn('WCL char error for', p.name, e); }
+      }));
+      // Small delay between batches to avoid rate limiting
+      if (i + BATCH_SIZE < players.length) await new Promise(r => setTimeout(r, 300));
+    }
 
-    console.log('WCL fetch complete, re-rendering');
+    // Final re-render to update sort order if sorted by WCL
     if (lastRenderData.roles.length) render(lastRenderData);
   } catch(e) { console.warn('WCL fetch failed:', e.message); }
+}
+
+function wclCellHtml(wcl, playerName) {
+  if (!wcl || wcl.medianPerf === null || wcl.medianPerf === undefined) return '<span style="color:var(--text-dim);font-size:11px;">—</span>';
+  const col = wclColor(wcl.medianPerf);
+  const tip = `Median: ${Math.round(wcl.medianPerf)}%${wcl.bestPerf !== null ? ` | Best: ${Math.round(wcl.bestPerf)}%` : ''}${wcl.points !== null ? ` | All Stars: ${Math.round(wcl.points)}` : ''}`;
+  const wclName = (playerName ? (canonicalNames[normalizeName(playerName)] || playerName) : '').toLowerCase();
+  const href = `https://fresh.warcraftlogs.com/character/us/dreamscythe/${encodeURIComponent(wclName)}`;
+  return `<a href="${href}" target="_blank" rel="noopener" style="color:${col};font-family:'Cinzel',serif;font-size:12px;font-weight:600;text-decoration:none;" title="${tip}">${Math.round(wcl.medianPerf)}%</a>`;
+}
+
+function updateWclCell(key, entry) {
+  document.querySelectorAll(`[data-wcl-key="${key}"]`).forEach(td => {
+    td.innerHTML = wclCellHtml(entry, key);
+  });
 }
 
 function wclColor(pct) {
@@ -2231,12 +2259,10 @@ function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, point
             const col = hi ? C5 : t20 ? C4 : b20 ? C2 : zlo ? C1 : C3;
             return `color:${col};`;
           })()}">${pts}</td>
-          <td style="text-align:center;">${(() => {
+          <td style="text-align:center;" class="wcl-col" data-wcl-key="${normalizeName(p.name)}">${(() => {
             const wcl = wclData[normalizeName(p.name)];
-            if (!wcl || wcl.medianPerf === null || wcl.medianPerf === undefined) return '<span style="color:var(--text-dim);font-size:11px;">—</span>';
-            const col = wclColor(wcl.medianPerf);
-            const tip = `Median: ${Math.round(wcl.medianPerf)}%${wcl.bestPerf !== null ? ` | Best: ${Math.round(wcl.bestPerf)}%` : ''}${wcl.points !== null ? ` | All Stars: ${Math.round(wcl.points)}` : ''}`;
-            return `<span style="color:${col};font-family:'Cinzel',serif;font-size:12px;font-weight:600;" title="${tip}">${Math.round(wcl.medianPerf)}%</span>`;
+            if (!wcl || wcl.medianPerf === null || wcl.medianPerf === undefined) return '<span class="wcl-spinner"></span>';
+            return wclCellHtml(wcl, p.name);
           })()}</td>
           <td class="consumes-cell">${(() => {
             const scores = Object.values(buffScoreByPlayerDate[normalizeName(p.name)] || {}).map(v => v?.total).filter(v => v !== null);
@@ -2342,7 +2368,7 @@ function render({ dates, roles }) {
           <col style="width:70px;">  <!-- Priority -->
           <col style="width:24px;">  <!-- Gear flag -->
           <col style="width:64px;">  <!-- Loot Score -->
-          <col style="width:70px;">  <!-- WCL -->
+          <col style="width:70px;" class="wcl-col">  <!-- WCL -->
           <col style="width:80px;">  <!-- Consumes -->
           <col>                      <!-- Raids (dots) -->
           <col style="width:50px;">  <!-- # -->
@@ -2354,7 +2380,7 @@ function render({ dates, roles }) {
             <th data-col="priority" onclick="setSort('${roleSafeId}', '${role.name}', 'priority')" style="cursor:pointer;text-align:center;" title="Loot priority recommendation based on raid attendance, consume usage, and loot received.">Priority<span class="sort-arrow">${state.col==='priority' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
             <th></th>
             <th data-col="points" onclick="setSort('${roleSafeId}', '${role.name}', 'points')" style="cursor:pointer;text-align:center;" title="Amount of loot received relative to raids attended.">Loot Score<span class="sort-arrow">${state.col==='points' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
-            <th data-col="wcl" onclick="setSort('${roleSafeId}', '${role.name}', 'wcl')" style="cursor:pointer;text-align:center;" title="WarcraftLogs median parse % for current tier.">WCL<span class="sort-arrow">${state.col==='wcl' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
+            <th data-col="wcl" onclick="setSort('${roleSafeId}', '${role.name}', 'wcl')" style="cursor:pointer;text-align:center;" class="wcl-col">WCL<span class="sort-arrow">${state.col==='wcl' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
             <th data-col="consumes" onclick="setSort('${roleSafeId}', '${role.name}', 'consumes')" style="cursor:pointer;text-align:center;" title="Uptime of all required consumables.">Consumes<span class="sort-arrow">${state.col==='consumes' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
             <th style="text-align:center;" title="Raids attended. Color indicates consumable usage.">Raids</th>
             <th data-col="attendance" onclick="setSort('${roleSafeId}', '${role.name}', 'attendance')" style="cursor:pointer;text-align:center;">#<span class="sort-arrow">${state.col==='attendance' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
@@ -2486,6 +2512,7 @@ function initWclIfSaved() {
   if (stored && Date.now() < storedExpiry) {
     setWclStatus('✓ Connected to WarcraftLogs (' + WCL_REALM + ')', 'success');
   } else {
+    document.body.classList.add('wcl-hidden');
     const topBtn = document.getElementById('wclConnectTopBtn');
     if (topBtn) topBtn.style.display = '';
   }
@@ -3174,13 +3201,7 @@ function onItemChange() {
       <td class="priority-cell" style="color:${prCol};" title="${fullTooltip}">${prStr !== '—' ? `<span class="priority-score" style="color:${prCol};">${prStr}</span>` : '<span style="color:var(--text-dim);font-style:italic;font-size:12px;">—</span>'}</td>
       <td class="gear-flag-cell">${gearHtml}</td>
       <td class="points-cell" style="color:${ptsCol};text-align:center;">${pts}</td>
-      <td style="text-align:center;">${(() => {
-        const wcl = wclData[key];
-        if (!wcl || wcl.medianPerf === null || wcl.medianPerf === undefined) return '<span style="color:var(--text-dim);font-size:11px;">—</span>';
-        const wclCol = wclColor(wcl.medianPerf);
-        const tip = `Median: ${Math.round(wcl.medianPerf)}%${wcl.bestPerf !== null ? ` | Best: ${Math.round(wcl.bestPerf)}%` : ''}${wcl.points !== null ? ` | All Stars: ${Math.round(wcl.points)}` : ''}`;
-        return `<span style="color:${wclCol};font-family:'Cinzel',serif;font-size:12px;font-weight:600;" title="${tip}">${Math.round(wcl.medianPerf)}%</span>`;
-      })()}</td>
+      <td style="text-align:center;" class="wcl-col" data-wcl-key="${key}">${wclCellHtml(wclData[key], p.name) || '<span class="wcl-spinner"></span>'}</td>
       <td class="consumes-cell" style="text-align:center;">${conStr}</td>
       <td>${dotsHtml}</td>
       <td class="att-count" style="text-align:right;">${p.attended}</td>
@@ -3193,8 +3214,8 @@ function onItemChange() {
     </tr>`;
   }
 
-  const thS = (label, col, align='center') =>
-    `<th onclick="setLootSort('${col}')" style="cursor:pointer;text-align:${align};padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);white-space:nowrap;" title="${col === 'priority' ? 'Loot priority recommendation based on raid attendance, consume usage, and loot received.' : col === 'points' ? 'Amount of loot received relative to raids attended.' : col === 'consumes' ? 'Uptime of all required consumables.' : col === 'attendance' ? 'Raids attended.' : ''}">${label}<span class="sort-arrow">${lootSortArrow(col)}</span></th>`;
+  const thS = (label, col, align='center', extraClass='') =>
+    `<th onclick="setLootSort('${col}')" class="${extraClass}" style="cursor:pointer;text-align:${align};padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);white-space:nowrap;" title="${col === 'priority' ? 'Loot priority recommendation based on raid attendance, consume usage, and loot received.' : col === 'points' ? 'Amount of loot received relative to raids attended.' : col === 'consumes' ? 'Uptime of all required consumables.' : col === 'attendance' ? 'Raids attended.' : ''}">${label}<span class="sort-arrow">${lootSortArrow(col)}</span></th>`;
 
   // Re-init Wowhead tooltips after DOM update
   el.innerHTML = itemHeaderHtml + `
@@ -3204,7 +3225,7 @@ function onItemChange() {
         <col style="width:70px;">  <!-- Priority -->
         <col style="width:24px;">  <!-- Gear flag -->
         <col style="width:80px;">  <!-- Loot Score -->
-        <col style="width:70px;">  <!-- WCL -->
+        <col style="width:70px;" class="wcl-col">  <!-- WCL -->
         <col style="width:80px;">  <!-- Consumes -->
         <col>                      <!-- Raids (dots) -->
         <col style="width:50px;">  <!-- # -->
@@ -3216,7 +3237,7 @@ function onItemChange() {
           ${thS('Priority','priority')}
           <th style="padding:6px 12px;"></th>
           ${thS('Loot Score','points')}
-          ${thS('WCL','wcl')}
+          ${thS('WCL','wcl','center','wcl-col')}
           ${thS('Consumes','consumes')}
           <th style="padding:6px 12px;text-align:center;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);" title="Raids attended. Color indicates consumable usage.">Raids</th>
           ${thS('#','attendance')}
