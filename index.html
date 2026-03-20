@@ -1011,6 +1011,10 @@
     <p class="subtitle">Loot Council Summary</p>
   </header>
 
+  <div id="readOnlyBadge" style="text-align:center;margin:6px 0 2px;display:none;">
+    <span style="font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);border:1px solid var(--border);padding:2px 10px;border-radius:2px;">Read-Only Mode</span>
+  </div>
+
   <div class="group-btns" style="justify-content:center;margin:4px auto 0;">
     <button class="group-btn active" data-mode="role" onclick="setGrouping('role')">Role</button>
     <button class="group-btn" data-mode="t45" onclick="setGrouping('t45')">T4/5</button>
@@ -1087,25 +1091,27 @@
     <div class="cla-add-form">
       <input class="cla-input" id="claLabel" placeholder="Label (e.g. 2/26)" />
       <input class="cla-input wide" id="claUrl" placeholder="Google Sheet URL" />
-      <input class="cla-input" id="claGearGid" placeholder="Gear Issues GID" />
-      <input class="cla-input" id="claGearListingGid" placeholder="Gear Listing GID (optional)" />
-      <input class="cla-input" id="claBuffGid" placeholder="Buff Consumables GID" />
+      <input class="cla-input" id="claGearGid" placeholder="Issues GID" />
+      <input class="cla-input" id="claGearListingGid" placeholder="Gear GID (optional)" />
+      <input class="cla-input" id="claBuffGid" placeholder="Consumes GID" />
       <button class="btn" onclick="addCla()">+ Add</button>
-    </div>
-    <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
-      <span style="font-size:12px;color:var(--text-dim);">Authenticated via GitHub</span>
-      <button class="btn" onclick="clearGithubToken()" style="font-size:11px;padding:3px 10px;">Disconnect</button>
     </div>
   </div>
 
   <!-- GitHub auth footer (shown when not authenticated) -->
   <div id="githubAuthFooter" style="margin-top:32px;padding:20px;border:1px solid var(--border);border-radius:4px;background:rgba(255,255,255,0.02);display:none;">
-    <div style="font-family:'Cinzel',serif;font-size:13px;letter-spacing:0.15em;color:var(--gold);margin-bottom:8px;">GitHub Authentication</div>
-    <div style="font-size:13px;color:var(--text-dim);margin-bottom:12px;">Enter a GitHub Personal Access Token to enable CLA sheet management.</div>
+    <div style="font-family:'Cinzel',serif;font-size:13px;letter-spacing:0.15em;color:var(--gold);margin-bottom:8px;">Read-Only Mode</div>
+    <div style="font-size:13px;color:var(--text-dim);margin-bottom:12px;">Enter a GitHub Personal Access Token to disable read-only mode.</div>
     <div style="display:flex;gap:8px;align-items:center;">
       <input type="password" id="claToken" class="cla-input wide" placeholder="GitHub Personal Access Token" style="flex:1;" />
       <button class="btn primary" onclick="saveGithubToken()">Save Token</button>
     </div>
+  </div>
+
+  <!-- Persistent auth status bar (always visible when authenticated) -->
+  <div id="githubAuthBar" style="display:none;margin-top:24px;padding:8px 12px;border-top:1px solid var(--border);display:none;align-items:center;justify-content:space-between;">
+    <span style="font-size:12px;color:var(--text-dim);">&#128273; Authenticated via GitHub</span>
+    <button class="btn" onclick="clearGithubToken()" style="font-size:11px;padding:3px 10px;">Disconnect</button>
   </div>
 
 </div>
@@ -2574,8 +2580,12 @@ function updateAuthState() {
   const authed = !!githubToken;
   const adminNav = document.getElementById('adminNav');
   const authFooter = document.getElementById('githubAuthFooter');
+  const authBar = document.getElementById('githubAuthBar');
+  const readOnlyBadge = document.getElementById('readOnlyBadge');
   if (adminNav) adminNav.style.display = authed ? 'flex' : 'none';
   if (authFooter) authFooter.style.display = authed ? 'none' : 'block';
+  if (authBar) authBar.style.display = authed ? 'flex' : 'none';
+  if (readOnlyBadge) readOnlyBadge.style.display = authed ? 'none' : 'block';
   // If CLA panel is visible but no longer authed, hide it
   if (!authed && groupingMode === 'cla') setGrouping('role');
 }
@@ -2596,7 +2606,7 @@ function renderClaList() {
     <div class="cla-row">
       <span class="cla-row-label">${s.label}</span>
       <span class="cla-row-url" title="${s.url}">${s.url.substring(0, 60)}...</span>
-      <span class="cla-row-gids">Gear: ${s.gearGid} / Listing: ${s.gearListingGid || '—'} / Buff: ${s.buffGid}</span>
+      <span class="cla-row-gids">Issues: ${s.gearGid} / Gear: ${s.gearListingGid || '—'} / Consumes: ${s.buffGid}</span>
       <button class="cla-remove" onclick="removeCla(${i})" title="Remove">✕</button>
     </div>
   `).join('');
