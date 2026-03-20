@@ -55,7 +55,7 @@
   /* Header */
   header {
     text-align: center;
-    padding: 48px 0 40px;
+    padding: 48px 0 20px;
     position: relative;
   }
 
@@ -1007,21 +1007,24 @@
   <header>
     <h1>Don't Be Suspicious</h1>
     <p class="subtitle">Loot Council Summary</p>
-    <div class="group-btns" style="margin-top:8px;">
-      <button class="group-btn active" data-mode="role" onclick="setGrouping('role')">Role</button>
-      <button class="group-btn" data-mode="t45" onclick="setGrouping('t45')">T4/5</button>
-      <button class="group-btn" data-mode="t6" onclick="setGrouping('t6')">T6</button>
-      <button class="group-btn" data-mode="loot" onclick="setGrouping('loot')">Loot</button>
-    </div>
   </header>
+
+  <div class="group-btns" style="justify-content:center;margin:4px auto 0;">
+    <button class="group-btn active" data-mode="role" onclick="setGrouping('role')">Role</button>
+    <button class="group-btn" data-mode="t45" onclick="setGrouping('t45')">T4/5</button>
+    <button class="group-btn" data-mode="t6" onclick="setGrouping('t6')">T6</button>
+    <button class="group-btn" data-mode="loot" onclick="setGrouping('loot')">Loot</button>
+  </div>
 
   <div class="controls">
     <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
-      <button class="btn primary" onclick="fetchData()">⟳ Fetch Data</button>
-      <button class="btn" id="wclConnectTopBtn" onclick="connectWcl()" style="display:none;font-size:12px;padding:4px 10px;">⚡ Connect WarcraftLogs</button>
-      <div id="wclStatus" style="font-size:12px;color:var(--text-dim);font-style:italic;"></div>
+      <button class="btn primary" onclick="fetchData()" style="width:100%;">⟳ Fetch Data</button>
+      <button class="btn" id="wclConnectTopBtn" onclick="connectWcl()" style="display:none;width:100%;">⚡ WarcraftLogs</button>
     </div>
-    <span class="status" id="status">Click Fetch Data to load the latest raid summary</span>
+    <div style="margin-left:auto;display:flex;flex-direction:column;align-items:flex-end;gap:2px;">
+      <span class="status" id="status">Click Fetch Data to load the latest raid summary</span>
+      <span id="wclStatus" style="font-size:12px;color:var(--text-dim);font-style:italic;"></span>
+    </div>
   </div>
 
   <textarea id="claPersist" style="display:none;"></textarea>
@@ -1695,8 +1698,9 @@ async function fetchWclAllStars(realm) {
   try {
 
     // Build player list with their role for metric selection
+    // Include ALL named players (even pct===null / inactive with no CLA) so spinners get resolved
     const players = lastRenderData.roles.flatMap(r =>
-      r.players.filter(p => p.name && p.pct !== null).map(p => ({ ...p, roleName: r.name }))
+      r.players.filter(p => p.name).map(p => ({ ...p, roleName: r.name }))
     );
     console.log('Fetching WCL for', players.length, 'players');
     // Process in batches of 5 to avoid rate-limiting proxies
@@ -1704,6 +1708,7 @@ async function fetchWclAllStars(realm) {
     for (let i = 0; i < players.length; i += BATCH_SIZE) {
       const batch = players.slice(i, i + BATCH_SIZE);
       await Promise.all(batch.map(async p => {
+        // Use canonical name from CLA if available, otherwise fall back to display name
         const wclName = canonicalNames[normalizeName(p.name)] || p.name;
         const isHealer = p.roleName === 'Healers';
         const metric = isHealer ? 'hps' : 'dps';
