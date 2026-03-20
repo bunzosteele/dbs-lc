@@ -1318,17 +1318,7 @@ function parseClasses(text) {
 // Item IDs loaded from gear-item-ids.json into gearItemIds map
 
 async function fetchItemIcons() {
-  const ids = [...new Set(Object.values(gearItemIds).filter(v => typeof v === 'number'))];
-  const toFetch = ids.filter(id => !itemIcons[id]);
-  console.log(`fetchItemIcons: ${ids.length} total IDs, ${toFetch.length} to fetch`);
-  await Promise.all(toFetch.map(async id => {
-    try {
-      const text = await proxyFetch(`${ICON_SCRIPT}?itemId=${id}`);
-      const data = JSON.parse(text);
-      if (data.icon) itemIcons[id] = data.icon.toLowerCase();
-    } catch(e) { console.warn('Icon fetch error for id:', id, e.message); }
-  }));
-  console.log(`fetchItemIcons: done, ${Object.keys(itemIcons).length} icons cached`);
+  // Icons are now embedded in gear-item-ids.json and loaded at startup — no-op
 }
 
 function fetchItemMap() {
@@ -1359,7 +1349,9 @@ function lootValueColor(value) {
 
 function getItemId(itemName) {
   const key = normalizeName(itemName);
-  return itemMap[key]?.id || gearItemIds[key] || null;
+  const entry = gearItemIds[key];
+  if (!entry) return itemMap[key]?.id || null;
+  return typeof entry === 'object' ? entry.id : entry;
 }
 
 function itemIconImg(id, size = 18) {
@@ -1928,10 +1920,7 @@ async function fetchData() {
       setStatus(`Updated at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`, 'success');
     }
     render(data);
-    // Fetch icons after all data (including gear listings) is loaded
-    fetchItemIcons().then(() => {
-      if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks();
-    });
+    if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks();
   } catch(e) {
     setStatus(`Failed to load data — ${e?.message}`, 'error');
     showErrors();
@@ -2454,9 +2443,7 @@ function toggleLoot(td, playerName) {
   tr.after(lootTr);
   arrow.textContent = '▾';
   // Ensure icons are fetched for any newly visible loot items
-  fetchItemIcons().then(() => {
-    if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks();
-  });
+  if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks();
 }
 
 // ── CLA Management ──────────────────────────────────────────────
@@ -2666,7 +2653,7 @@ async function processGearListingForItemIds(sheetId, gearListingGid) {
     const allItems = new Set();
     Object.values(gearData).forEach(slots => Object.values(slots).forEach(name => allItems.add(name)));
 
-    const unknown = [...allItems].filter(name => !gearItemIds[normalizeName(name)]);
+    const unknown = [...allItems].filter(name => { const e = gearItemIds[normalizeName(name)]; return !e || (typeof e === 'object' ? !e.id : false); });
     if (!unknown.length) {
       setHint('All gear items already in map!', 'success');
       return;
@@ -2682,7 +2669,14 @@ async function processGearListingForItemIds(sheetId, gearListingGid) {
       await Promise.all(batch.map(async name => {
         const id = await lookupItemId(name);
         if (id) {
-          gearItemIds[normalizeName(name)] = id;
+          // Also fetch icon for new items
+          let icon = null;
+          try {
+            const iconText = await proxyFetch(`${ICON_SCRIPT}?itemId=${id}`);
+            const iconData = JSON.parse(iconText);
+            if (iconData.icon) { icon = iconData.icon.toLowerCase(); itemIcons[id] = icon; }
+          } catch(e) {}
+          gearItemIds[normalizeName(name)] = { id, icon };
           found++;
         }
       }));
@@ -2917,7 +2911,13 @@ async function loadGearItemIdsFromRepo() {
     const data = await res.json();
     if (typeof data === 'object' && data !== null) {
       gearItemIds = data;
-      console.log('Loaded', Object.keys(gearItemIds).length, 'gear item IDs from repo');
+      // Populate itemIcons from embedded icon data (new format: {id, icon})
+      for (const entry of Object.values(data)) {
+        if (entry && typeof entry === 'object' && entry.id && entry.icon) {
+          itemIcons[entry.id] = entry.icon;
+        }
+      }
+      console.log('Loaded', Object.keys(gearItemIds).length, 'gear item IDs from repo,', Object.keys(itemIcons).length, 'icons');
     } else {
       console.warn('gear-item-ids.json: unexpected format', data);
     }
@@ -3312,7 +3312,6 @@ function onItemChange() {
   }
 
   const relevantSlots = getRelevantSlots(item);
-  console.log('getRelevantSlots for', item, '->', relevantSlots, '| gearListingByPlayer players:', Object.keys(gearListingByPlayer).length);
 
   function lootPlayerRow(p, dimmed, badge) {
     const key = normalizeName(p.name);
