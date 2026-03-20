@@ -1902,7 +1902,6 @@ async function fetchData() {
 
   try {
     fetchItemMap(); // instant — populates from static map
-    fetchItemIcons(); // non-blocking background fetch
 
     // Fire all fetches in parallel
     const [attendanceText] = await Promise.all([
@@ -1930,6 +1929,10 @@ async function fetchData() {
       setStatus(`Updated at ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`, 'success');
     }
     render(data);
+    // Fetch icons after all data (including gear listings) is loaded
+    fetchItemIcons().then(() => {
+      if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks();
+    });
   } catch(e) {
     setStatus(`Failed to load data — ${e?.message}`, 'error');
     showErrors();
@@ -2780,6 +2783,8 @@ async function fetchAllClaData() {
     try { parseGearIssues(text, label); }
     catch(e) { addError(`CLA "${label}" — Gear Issues`, `Parse error: ${e.message}`); }
   }
+  // Sort by sheet index so newer CLAs correctly overwrite older ones
+  gearListingResults.sort((a, b) => a.sheetIdx - b.sheetIdx);
   for (const { label, text, sheetIdx } of gearListingResults) {
     try {
       const data = parseGearListing(text);
