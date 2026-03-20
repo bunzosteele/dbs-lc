@@ -1117,6 +1117,7 @@ let itemValueMap = {}; // normalized item name -> loot value (number)
 let itemIcons = {}; // item id -> icon name
 let claSheets = [];
 let claDataByPlayer = {};
+let canonicalNames = {}; // normalized key -> exact name with special chars from CLA
 let buffScoreByPlayerDate = {}; // normalized name -> { normalizedDate -> pct }
 let latestGearIssuesByPlayer = {}; // normalized name -> { label, issues[] }
 let claSheetDates = {}; // label -> Date object parsed from buff tab C3
@@ -1687,15 +1688,16 @@ async function fetchWclAllStars(realm) {
     const players = lastRenderData.roles.flatMap(r => r.players).filter(p => p.name && p.pct !== null);
     console.log('Fetching WCL for', players.length, 'players');
     await Promise.all(players.map(async p => {
+      const wclName = canonicalNames[normalizeName(p.name)] || p.name;
       const charQuery = `{
         characterData {
-          character(name: "${p.name}", serverSlug: "${realm}", serverRegion: "${WCL_REGION}") {
+          character(name: "${wclName}", serverSlug: "${realm}", serverRegion: "${WCL_REGION}") {
             zoneRankings(zoneID: ${zone.id})
           }
         }
       }`;
       try {
-        const charData = await wclGraphQL(charQuery, token).catch(e => { console.warn('Char query failed for', p.name, e); return null; });
+        const charData = await wclGraphQL(charQuery, token).catch(e => { console.warn('Char query failed for', wclName, e); return null; });
         if (!charData) return;
         const char = charData?.data?.characterData?.character;
         console.log('Raw char data for', p.name, ':', JSON.stringify(charData)?.slice(0, 400));
@@ -2592,6 +2594,7 @@ async function fetchAllClaData() {
   buffScoreByPlayerDate = {};
   latestGearIssuesByPlayer = {};
   claSheetDates = {};
+  canonicalNames = {};
 
   // Fetch all CLA sheets in parallel, collecting raw gear results first
   const gearResults = []; // { label, text } in fetch-completion order
@@ -2673,6 +2676,8 @@ function parseBuffConsumables(text, label) {
     const key = normalizeName(player);
     if (!claDataByPlayer[key]) claDataByPlayer[key] = { gearIssues: [], buffConsumables: [] };
     claDataByPlayer[key].buffConsumables.push({ label, cols });
+    // Store exact name with special chars for WCL lookups
+    if (!canonicalNames[key]) canonicalNames[key] = player;
 
     // Store total average + scrolls score keyed by normalized date for dot colouring
     const totalAvg = values[0]?.trim() || '0%'; // col C = index 0 of slice(2) = total average
