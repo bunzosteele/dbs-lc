@@ -20986,5 +20986,41 @@
     "icon": "inv_misc_cape_20",
     "slot": "Back",
     "name": "Cloak of Blade Turning"
+  },
+  "redemptionheadpiece": {
+    "id": 22428,
+    "icon": "inv_helmet_61",
+    "slot": "Head",
+    "name": "Redemption Headpiece"
+  },
+  "redemptionwristguards": {
+    "id": 22424,
+    "icon": "inv_bracer_11",
+    "slot": "Wrist",
+    "name": "Redemption Wristguards"
+  },
+  "redemptiongirdle": {
+    "id": 22427,
+    "icon": "inv_belt_29",
+    "slot": "Waist",
+    "name": "Redemption Girdle"
+  },
+  "justicebearerspauldrons": {
+    "id": 27539,
+    "icon": "inv_shoulder_36",
+    "slot": "Shoulder",
+    "name": "Justice Bearer's Pauldrons"
+  },
+  "cassockoftheloyal": {
+    "id": 27748,
+    "icon": "inv_pants_plate_16",
+    "slot": "Legs",
+    "name": "Cassock of the Loyal"
+  },
+  "libramoflight": {
+    "id": 23006,
+    "icon": "spell_holy_holybolt",
+    "slot": "Relic",
+    "name": "Libram of Light"
   }
 }
