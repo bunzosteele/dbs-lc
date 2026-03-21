@@ -4183,17 +4183,19 @@ function onItemChange() {
     const key = normalizeName(p.name);
     const playerName = p.name;
 
-    // Compute candidate info lazily
-    const _candidateItemId = getItemId(item);
-    if (!_candidateItemId) return { mult: 1, reason: null };
+    // Compute candidate info lazily — resolve token items to class-specific rewards
+    const _rawCandidateId = getItemId(item);
+    if (!_rawCandidateId) return { mult: 1, reason: null };
+    const _candidateItemId = getTokenRewardId(_rawCandidateId, playerName) || _rawCandidateId;
 
-    // Skip if candidate not on anyone's BiS list
+    // Skip if candidate (or its token reward) not on anyone's BiS list
+    const _checkIds = new Set([_rawCandidateId, _candidateItemId]);
     const _onAnyBis = Object.values(bisData).some(slots =>
-      Object.values(slots).some(items => items.some(([id]) => id === _candidateItemId))
+      Object.values(slots).some(items => items.some(([id]) => _checkIds.has(id)))
     );
     if (!_onAnyBis) return { mult: 1, reason: null };
 
-    // Get candidate EPV for this player
+    // Get candidate EPV for this player using the resolved item ID
     const candidateEpv = getPlayerItemEpv(playerName, _candidateItemId);
 
     // Candidate not on this player's BiS list but on others' — .5x
@@ -4201,7 +4203,7 @@ function onItemChange() {
 
     // Get current item(s) in relevant slots — inline slot lookup to avoid TDZ
     const gear = gearListingByPlayer[key]?.slots;
-    const _entry = gearItemIds[normalizeName(item)];
+    const _entry = gearItemIds[normalizeName(item)] || Object.values(gearItemIds).find(v => typeof v === 'object' && v.id === _rawCandidateId);
     const _entrySlot = _entry && typeof _entry === 'object' ? _entry.slot : null;
     const _SLOT_MAP = {
       'Head': ['Head'], 'Neck': ['Neck'], 'Shoulder': ['Shoulders'],
@@ -4409,25 +4411,23 @@ function onItemChange() {
     (slots['Two Hand'] || []).some(([id]) => id === candidateItemId)
   );
 
-  function makeBisIndicator(candidateEpv, currentEpv, currentRank, candidateRank, rewardItemId, anchorId) {
+  function makeBisIndicator(candidateEpv, currentEpv, currentRank, candidateRank, rewardItemId) {
     const iw = 'display:inline-flex;align-items:center;justify-content:center;width:20px;flex-shrink:0;position:relative;';
     // Helper: wrap arrow in wowhead link if we have a token reward item ID
-    const whEnter = anchorId ? `onmouseenter="var a=document.getElementById('${anchorId}');if(a){a.dispatchEvent(new MouseEvent('mouseenter',{bubbles:true,cancelable:true}));}"` : '';
-    const whLeave = anchorId ? `onmouseleave="var a=document.getElementById('${anchorId}');if(a){a.dispatchEvent(new MouseEvent('mouseleave',{bubbles:true,cancelable:true}));}"` : '';
     const wrapArrow = (arrow, color, title) => {
       const spanStyle = `${iw}font-size:16px;color:${color};text-decoration:none;`;
-      if (rewardItemId && anchorId) {
-        return `<span style="${spanStyle}" title="${title}" ${whEnter} ${whLeave}>${arrow}</span>`;
+      if (rewardItemId) {
+        return `<span style="${spanStyle}" title="${title}"><a href="https://www.wowhead.com/tbc/item=${rewardItemId}" data-wowhead="item=${rewardItemId}&dataset=tbc&anchor=top" target="_blank" rel="noopener" style="position:absolute;inset:0;"></a>${arrow}</span>`;
       }
       return `<span style="${spanStyle}" title="${title}">${arrow}</span>`;
     };
     if (candidateRank === null) {
-      return rewardItemId && anchorId
-        ? `<span style="${iw}font-size:14px;" title="Considered item is not on the BiS list for this player's spec" ${whEnter} ${whLeave}>🛑</span>`
+      return rewardItemId
+        ? `<span style="${iw}font-size:14px;position:relative;" title="Considered item is not on the BiS list for this player's spec"><a href="https://www.wowhead.com/tbc/item=${rewardItemId}" data-wowhead="item=${rewardItemId}&dataset=tbc&anchor=top" target="_blank" rel="noopener" style="position:absolute;inset:0;"></a>🛑</span>`
         : `<span style="${iw}font-size:14px;" title="Considered item is not on the BiS list for this player's spec">🛑</span>`;
     } else if (currentRank === null) {
-      return rewardItemId && anchorId
-        ? `<span style="${iw}font-size:14px;color:#d4a017;" title="Current item is not on the BiS list for this player's spec" ${whEnter} ${whLeave}>⚠</span>`
+      return rewardItemId
+        ? `<span style="${iw}font-size:14px;color:#d4a017;position:relative;" title="Current item is not on the BiS list for this player's spec"><a href="https://www.wowhead.com/tbc/item=${rewardItemId}" data-wowhead="item=${rewardItemId}&dataset=tbc&anchor=top" target="_blank" rel="noopener" style="position:absolute;inset:0;"></a>⚠</span>`
         : `<span style="${iw}font-size:14px;color:#d4a017;" title="Current item is not on the BiS list for this player's spec">⚠</span>`;
     } else if (candidateEpv !== null && currentEpv !== null) {
       const delta = candidateEpv - currentEpv;
@@ -4482,7 +4482,7 @@ function onItemChange() {
         if (candidateIsTwoHand && items.length > 1) {
           // Two-hand vs MH+OH: show combined indicator on first item only, spacer on second
           if (idx === 0) {
-            bisIndicator = makeBisIndicator(candidateEpv, combinedCurrentEpv, combinedCurrentRank, candidateRank, _rewardItemId, _rewardItemId ? `wh-anchor-${playerKey}-${id}` : null);
+            bisIndicator = makeBisIndicator(candidateEpv, combinedCurrentEpv, combinedCurrentRank, candidateRank, _rewardItemId);
           } else {
             const iw = 'display:inline-flex;align-items:center;justify-content:center;width:20px;flex-shrink:0;position:relative;';
             bisIndicator = `<span style="${iw}"></span>`;
@@ -4491,13 +4491,12 @@ function onItemChange() {
           // Normal case: per-item indicator
           const currentEpv = getPlayerItemEpv(playerName, id);
           const currentRank = getPlayerItemBisRank(playerName, id);
-          bisIndicator = makeBisIndicator(candidateEpv, currentEpv, currentRank, candidateRank, _rewardItemId, _rewardItemId ? `wh-anchor-${playerKey}-${id}` : null);
+          bisIndicator = makeBisIndicator(candidateEpv, currentEpv, currentRank, candidateRank, _rewardItemId);
         }
       }
 
-      const anchorId = _rewardItemId ? `wh-anchor-${playerKey}-${id}` : null;
       return id
-        ? `<span style="display:inline-flex;align-items:center;gap:5px;">${bisIndicator}<a id="${anchorId || ''}" href="https://www.wowhead.com/tbc/item=${_rewardItemId || id}" data-wowhead="item=${_rewardItemId || id}&dataset=tbc" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--gold-light);font-size:15px;" title="${name}">${icon}${name.length > 28 ? name.slice(0,27) + '…' : name}</a></span>`
+        ? `<span style="display:inline-flex;align-items:center;gap:5px;">${bisIndicator}<a href="https://www.wowhead.com/tbc/item=${id}" data-wowhead="item=${id}&dataset=tbc" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--gold-light);font-size:15px;" title="${name}">${icon}${name.length > 28 ? name.slice(0,27) + '…' : name}</a></span>`
         : `<span style="display:inline-flex;align-items:center;gap:5px;">${bisIndicator}<span style="font-size:15px;color:var(--gold-light);">${name}</span></span>`;
     }).join('<br style="margin:2px 0;">');
 
