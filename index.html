@@ -3792,9 +3792,8 @@ function onItemChange() {
   const eligTop20 = eligThreshPts.length ? eligThreshPts[Math.floor(eligThreshPts.length * 0.8)] : Infinity;
 
   // Normalise priority scores within active eligible players only
-  const prScores = needIt.map(p => calculatePriority(p, eligBottom20, eligTop20, eligThreshPts).score * prioMultiplier(p).mult);
-  const maxPr = prScores.filter(s => s > 0).length ? Math.max(...prScores.filter(s => s > 0)) : 1;
-  const prNormFactor = maxPr > 0 ? 100 / maxPr : 1;
+  // prScores and normFactor computed after bisMultiplier is defined below
+  let prNormFactor = 1; // will be set after bisMultiplier definition
 
   // Prio multiplier helper
   function prioMultiplier(p) {
@@ -3806,10 +3805,67 @@ function onItemChange() {
     return { mult: (hard ? 1.75 : 1) * (soft ? 1.25 : 1), hard, soft };
   }
 
+  // BiS upgrade multiplier — applied after hard/soft prio, before normalization
+  function bisMultiplier(p) {
+    const key = normalizeName(p.name);
+    const playerName = p.name;
+
+    // Skip if candidate not on anyone's BiS list
+    if (!candidateOnBisForAnyone) return { mult: 1, reason: null };
+
+    // Get candidate EPV for this player
+    const candidateEpv = getPlayerItemEpv(playerName, candidateItemId);
+
+    // Candidate not on this player's BiS list but on others' — .5x
+    if (candidateEpv === null) return { mult: 0.5, reason: 'Not on BiS list for spec (×0.5)' };
+
+    // Get current item(s) in relevant slots
+    const gear = gearListingByPlayer[key]?.slots;
+    if (!gear || !relevantSlots || relevantSlots[0] === '__unknown__') return { mult: 1, reason: null };
+
+    const currentNames = relevantSlots.map(slot => gear[slot]).filter(Boolean);
+    if (!currentNames.length) return { mult: 1, reason: null };
+
+    // For two-hand candidates, sum EPVs of current MH+OH
+    let currentEpv = null;
+    if (candidateIsTwoHand && currentNames.length > 1) {
+      const epvs = currentNames.map(n => getPlayerItemEpv(playerName, getItemId(n))).filter(e => e !== null);
+      // Skip modifier if main hand current item not on BiS
+      const mhEpv = getPlayerItemEpv(playerName, getItemId(currentNames[0]));
+      if (mhEpv === null) return { mult: 1, reason: null };
+      currentEpv = epvs.reduce((a, b) => a + b, 0);
+    } else {
+      // Use first current item found; skip if not on BiS
+      for (const name of currentNames) {
+        const id = getItemId(name);
+        const epv = getPlayerItemEpv(playerName, id);
+        if (epv === null) return { mult: 1, reason: null }; // current not on BiS — skip modifier
+        currentEpv = epv;
+        break;
+      }
+    }
+
+    if (currentEpv === null) return { mult: 1, reason: null };
+
+    const delta = candidateEpv - currentEpv;
+    const pct = currentEpv > 0 ? (delta / currentEpv) * 100 : 0;
+
+    if (pct >= 20)       return { mult: 1.4, reason: `Major upgrade +${pct.toFixed(1)}% (×1.4)` };
+    else if (pct >= 5)   return { mult: 1.2, reason: `Upgrade +${pct.toFixed(1)}% (×1.2)` };
+    else if (pct >= -5)  return { mult: 1.0, reason: null };
+    else if (pct >= -20) return { mult: 0.8, reason: `Minor downgrade ${pct.toFixed(1)}% (×0.8)` };
+    else                 return { mult: 0.5, reason: `Major downgrade ${pct.toFixed(1)}% (×0.5)` };
+  }
+
   function lootPriorityScore(p) {
     const base = calculatePriority(p, eligBottom20, eligTop20, eligThreshPts).score;
-    return base * prioMultiplier(p).mult;
+    return base * prioMultiplier(p).mult * bisMultiplier(p).mult;
   }
+
+  // Now that bisMultiplier is defined, compute normalization factor
+  const _prScores = needIt.map(p => lootPriorityScore(p));
+  const _maxPr = _prScores.filter(s => s > 0).length ? Math.max(..._prScores.filter(s => s > 0)) : 1;
+  prNormFactor = _maxPr > 0 ? 100 / _maxPr : 1;
 
   // Sort needIt by selected column
   function getLootSortVal(p, col) {
@@ -3843,7 +3899,7 @@ function onItemChange() {
     'One-Hand': ['Weapon','Off-Hand'], 'Two-Hand': ['Weapon','Off-Hand'],
     'Off Hand': ['Weapon','Off-Hand'], 'Held In Off-hand': ['Off-Hand'],
     'Shield': ['Off-Hand'],
-    'Ranged': ['Weapon'], 'Relic': ['Wand/Idol/Relic etc.'],
+    'Ranged': ['Wand/Idol/Relic etc.'], 'Relic': ['Wand/Idol/Relic etc.'],
   };
 
   // Check if an item is a shield by inspecting its tooltip subclass
@@ -3866,7 +3922,7 @@ function onItemChange() {
     'Head': 'Head', 'Neck': 'Neck', 'Shoulder': 'Shoulders', 'Back': 'Cloak',
     'Chest': 'Chest', 'Wrist': 'Bracers', 'Hands': 'Hands', 'Waist': 'Waist',
     'Legs': 'Legs', 'Feet': 'Feet', 'Finger': 'Ring1', 'Trinket': 'Trinket1',
-    'Ranged': 'Weapon', 'Relic': 'Wand/Idol/Relic etc.',
+    'Ranged': 'Wand/Idol/Relic etc.', 'Relic': 'Wand/Idol/Relic etc.',
   };
 
   function getRelevantSlots(itemName) {
@@ -3919,7 +3975,7 @@ function onItemChange() {
           for (const [bisSlot, items] of Object.entries(slots)) {
             if (items.some(([id]) => id === candidateItemId)) {
               if (['Main Hand','One Hand','Two Hand','Off Hand'].includes(bisSlot)) return ['Weapon','Off-Hand'];
-              if (bisSlot === 'Ranged') return ['Weapon'];
+              if (bisSlot === 'Ranged') return ['Wand/Idol/Relic etc.'];
             }
           }
         }
@@ -4031,7 +4087,8 @@ function onItemChange() {
     // Priority
     const { score: prScore, tooltip: prTooltip } = calculatePriority(p, eligBottom20, eligTop20, eligThreshPts);
     const { mult, hard, soft } = prioMultiplier(p);
-    const adjScore = prScore * mult;
+    const { mult: bisMult, reason: bisReason } = bisMultiplier(p);
+    const adjScore = prScore * mult * bisMult;
     const normPr = Math.round(adjScore * prNormFactor * 10) / 10;
     const displayPr = normPr % 1 === 0 ? normPr.toFixed(0) : normPr.toFixed(1);
     const prStr = prScore > 0 ? displayPr : '—';
@@ -4039,6 +4096,7 @@ function onItemChange() {
     const prioLines = [];
     if (hard) prioLines.push('Hard Prio (×1.75)');
     if (soft) prioLines.push('Soft Prio (×1.25)');
+    if (bisReason) prioLines.push(bisReason);
     const fullTooltip = prTooltip + (prioLines.length ? '&#10;' + prioLines.join('&#10;') : '') + `&#10;Score: ${adjScore.toFixed(2)}`;
 
     // Gear flag
