@@ -4413,8 +4413,16 @@ function onItemChange() {
     (slots['Two Hand'] || []).some(([id]) => id === candidateItemId)
   );
 
-  function makeBisIndicator(candidateEpv, currentEpv, currentRank, candidateRank) {
+  function makeBisIndicator(candidateEpv, currentEpv, currentRank, candidateRank, rewardItemId) {
     const iw = 'display:inline-flex;align-items:center;justify-content:center;width:20px;flex-shrink:0;';
+    // Helper: wrap arrow in wowhead link if we have a token reward item ID
+    const wrapArrow = (arrow, color, title) => {
+      const spanStyle = `${iw}font-size:16px;color:${color};text-decoration:none;`;
+      if (rewardItemId) {
+        return `<a href="https://www.wowhead.com/tbc/item=${rewardItemId}" data-wowhead="item=${rewardItemId}&dataset=tbc" target="_blank" rel="noopener" style="${spanStyle}" title="${title}">${arrow}</a>`;
+      }
+      return `<span style="${spanStyle}" title="${title}">${arrow}</span>`;
+    };
     if (candidateRank === null) {
       return `<span style="${iw}font-size:14px;" title="This item is not on the BiS list for this player's spec">🛑</span>`;
     } else if (currentRank === null) {
@@ -4424,11 +4432,11 @@ function onItemChange() {
       const pct = currentEpv > 0 ? (delta / currentEpv) * 100 : 0;
       const pctStr = (delta >= 0 ? '+' : '') + pct.toFixed(1) + '%';
       const tip = `Candidate EPV: ${candidateEpv.toFixed(1)} | Current EPV: ${currentEpv.toFixed(1)} | Delta: ${delta >= 0 ? '+' : ''}${delta.toFixed(1)} (${pctStr})`;
-      if (pct >= 20)       return `<span style="${iw}font-size:16px;color:#4caa6e;" title="${tip}">⇑</span>`;
-      else if (pct >= 5)   return `<span style="${iw}font-size:16px;color:#8abf50;" title="${tip}">↑</span>`;
-      else if (pct <= -20) return `<span style="${iw}font-size:16px;color:#c94c4c;" title="${tip}">⇓</span>`;
-      else if (pct <= -5)  return `<span style="${iw}font-size:16px;color:#e07040;" title="${tip}">↓</span>`;
-      else                 return `<span style="${iw}font-size:16px;color:var(--text-dim);" title="${tip}">→</span>`;
+      if (pct >= 20)       return wrapArrow('⇑', '#4caa6e', tip);
+      else if (pct >= 5)   return wrapArrow('↑', '#8abf50', tip);
+      else if (pct <= -20) return wrapArrow('⇓', '#c94c4c', tip);
+      else if (pct <= -5)  return wrapArrow('↓', '#e07040', tip);
+      else                 return wrapArrow('→', 'var(--text-dim)', tip);
     }
     return `<span style="${iw}"></span>`; // empty spacer
   }
@@ -4443,6 +4451,8 @@ function onItemChange() {
       .find(p => normalizeName(p.name) === playerKey)?.name || playerKey;
       const candidateEpv = candidateOnBisForAnyone ? getPlayerItemEpv(playerName, candidateItemId) : null;
     const candidateRank = candidateOnBisForAnyone ? getPlayerItemBisRank(playerName, candidateItemId) : null;
+    // For token items, get the specific reward item ID for this player's spec (for Wowhead tooltip)
+    const _rewardItemId = candidateItemId ? (getTokenRewardId(candidateItemId, playerName) || null) : null;
   
     const items = slots.map(slot => gear[slot]).filter(Boolean);
     if (!items.length) return dimCell;
@@ -4470,7 +4480,7 @@ function onItemChange() {
         if (candidateIsTwoHand && items.length > 1) {
           // Two-hand vs MH+OH: show combined indicator on first item only, spacer on second
           if (idx === 0) {
-            bisIndicator = makeBisIndicator(candidateEpv, combinedCurrentEpv, combinedCurrentRank, candidateRank);
+            bisIndicator = makeBisIndicator(candidateEpv, combinedCurrentEpv, combinedCurrentRank, candidateRank, _rewardItemId);
           } else {
             const iw = 'display:inline-flex;align-items:center;justify-content:center;width:20px;flex-shrink:0;';
             bisIndicator = `<span style="${iw}"></span>`;
@@ -4479,7 +4489,7 @@ function onItemChange() {
           // Normal case: per-item indicator
           const currentEpv = getPlayerItemEpv(playerName, id);
           const currentRank = getPlayerItemBisRank(playerName, id);
-          bisIndicator = makeBisIndicator(candidateEpv, currentEpv, currentRank, candidateRank);
+          bisIndicator = makeBisIndicator(candidateEpv, currentEpv, currentRank, candidateRank, _rewardItemId);
         }
       }
 
