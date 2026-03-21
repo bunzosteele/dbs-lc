@@ -3214,7 +3214,7 @@ function parseGearIssues(text, label) {
 
     // Parse all issue cells, extracting item name and issue type
     // Items to always exclude from gear issue checks regardless of enchant status
-    const EXCLUDED_ITEMS = /mark of the champion/i;
+    const EXCLUDED_ITEMS = /mark of the champion|meta gem/i;
     const allIssues = row.slice(5)
       .map(v => v.trim())
       .filter(v => v && v !== '' && !v.startsWith('-') && !EXCLUDED_ITEMS.test(v))
@@ -3222,7 +3222,15 @@ function parseGearIssues(text, label) {
         const m = v.match(/^(.+?)\s*\[([^\]]+)\]$/);
         return m ? { raw: v, itemName: m[1].trim(), issue: m[2].trim() } : null;
       })
-      .filter(Boolean);
+      .filter(Boolean)
+      // Only track issues for items present on any BiS list
+      .filter(i => {
+        const itemId = getItemId(i.itemName);
+        if (!itemId) return false;
+        return Object.values(bisData).some(slots =>
+          Object.values(slots).some(items => items.some(([id]) => id === itemId))
+        );
+      });
 
     // Split into always-flagged and suboptimal
     const egregious = allIssues.filter(i => ALWAYS_FLAGGED.test('[' + i.issue + ']'));
