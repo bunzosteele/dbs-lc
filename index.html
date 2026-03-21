@@ -2397,9 +2397,16 @@ function isTop5BisItem(itemName, playerName) {
   if (!itemId || !specs.length) return false;
   for (const spec of specs) {
     if (!bisData[spec]) continue;
-    for (const items of Object.values(bisData[spec])) {
-      const entry = items.find(e => e[0] === itemId);
-      if (entry && entry[1] <= 10) return true;
+    for (const slotItems of Object.values(bisData[spec])) {
+      // Compute all-phases rank: deduplicate by item ID keeping best EPV, sort descending
+      const best = new Map();
+      for (const e of slotItems) {
+        if (!best.has(e[0]) || e[3] > best.get(e[0])[3]) best.set(e[0], e);
+      }
+      if (!best.has(itemId)) continue;
+      const sorted = [...best.values()].sort((a, b) => b[3] - a[3]);
+      const allPhasesRank = sorted.findIndex(e => e[0] === itemId) + 1;
+      if (allPhasesRank > 0 && allPhasesRank <= 10) return true;
     }
   }
   return false;
@@ -4333,11 +4340,11 @@ function onItemChange() {
       }
 
       return id
-        ? `<span style="display:inline-flex;align-items:center;gap:5px;">${bisIndicator}<a href="https://www.wowhead.com/tbc/item=${id}" data-wowhead="item=${id}&dataset=tbc" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--gold-light);font-size:15px;white-space:nowrap;">${icon}${name}</a></span>`
+        ? `<span style="display:inline-flex;align-items:center;gap:5px;">${bisIndicator}<a href="https://www.wowhead.com/tbc/item=${id}" data-wowhead="item=${id}&dataset=tbc" target="_blank" rel="noopener" style="display:inline-flex;align-items:center;gap:6px;text-decoration:none;color:var(--gold-light);font-size:15px;" title="${name}">${icon}${name.length > 28 ? name.slice(0,27) + '…' : name}</a></span>`
         : `<span style="display:inline-flex;align-items:center;gap:5px;">${bisIndicator}<span style="font-size:15px;color:var(--gold-light);">${name}</span></span>`;
     }).join('<br style="margin:2px 0;">');
 
-    return `<td style="padding:3px 8px;vertical-align:middle;text-align:left;">${html}</td>`;
+    return `<td style="padding:3px 8px;vertical-align:middle;text-align:left;max-width:32ch;overflow:hidden;">${html}</td>`;
   }
 
     const relevantSlots = getRelevantSlots(item);
@@ -4469,7 +4476,7 @@ function onItemChange() {
     <table style="width:100%;border-collapse:collapse;margin-top:24px;">
       <colgroup>
         <col style="width:16ch;min-width:16ch;"> <!-- Player -->
-        ${relevantSlots ? '<col style="width:180px;"> <!-- Current -->' : ''}
+        ${relevantSlots ? '<col style="width:32ch;max-width:32ch;"> <!-- Current -->' : ''}
         <col style="width:55px;">  <!-- Prio -->
         <col style="width:24px;">  <!-- Gear flag -->
         <col style="width:55px;">  <!-- LS -->
