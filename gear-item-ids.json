@@ -17999,6 +17999,12 @@
     "slot": "Shoulder",
     "name": "Mantle of Malorne"
   },
+  "mantleofmalorne": {
+    "id": 29100,
+    "icon": "inv_shoulder_14",
+    "slot": "Shoulder",
+    "name": "Mantle of Malorne"
+  },
   "_bis_33207": {
     "id": 33207,
     "icon": "inv_boots_plate_10",
@@ -18946,5 +18952,65 @@
     "icon": "spell_fire_sealoffire",
     "slot": "Held In Off-hand",
     "name": "Flametongue Seal"
+  },
+  "lurkersbelt": {
+  "id": 30677,
+  "icon": "inv_belt_03",
+  "slot": "Waist",
+  "name": "Lurker's Belt"
+  },
+  "telaarihuntinggirdle": {
+    "id":27521,
+    "icon":"inv_belt_09",
+    "slot":"Waist",
+    "name":"Telaari Hunting Girdle"
+  },
+  "scaledbreastplateofcarnage": {
+    "id":28599,
+    "icon":"inv_chest_chain_07",
+    "slot":"Chest",
+    "name":"Scaled Breastplate of Carnage"
+  },
+  "salvagershauberk": {
+    "id":30835,
+    "icon":"inv_chest_plate08",
+    "slot":"Chest",
+    "name":"Salvager's Hauberk"
+  },
+  "ringofredemption": {
+    "id":23066,
+    "icon":"inv_jewelry_ring_51naxxramas",
+    "slot":"Finger",
+    "name":"Ring of Redemption"
+  },
+  "bandofaccuria": {
+    "id":17063,
+    "icon":"inv_jewelry_ring_15",
+    "slot":"Finger",
+    "name":"Band of Accuria"
+  },
+  "nalikosrevenge": {
+    "id":25804,
+    "icon":"inv_jewelry_ring_16",
+    "slot":"Finger",
+    "name":"Naliko's Revenge"
+  },
+  "redemptionhandguards": {
+    "id":22426,
+    "icon":"inv_gauntlets_25",
+    "slot":"Hands",
+    "name":"Redemption Handguards"
+  },
+  "wrathinfusedgauntlets": {
+    "id":32077,
+    "icon":"inv_gauntlets_11",
+    "slot":"Hands",
+    "name":"Wrath Infused Gauntlets"
+  },
+  "thelightningcapacitor": {
+    "id":28785,
+    "icon":"inv_trinket_naxxramas06",
+    "slot":"Trinket",
+    "name":"The Lightning Capacitor"
   }
 }
