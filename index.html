@@ -1118,7 +1118,7 @@
           <div style="font-family:monospace;font-size:12px;background:var(--bg2);padding:8px 12px;border-left:2px solid var(--gold-dim);color:var(--text-dim);">
             GearMod = 1 / (1 + 0.1 × gearIssues)
           </div>
-          <div style="margin-top:8px;color:var(--text-dim);">Missing gems and missing enchants are always counted as gear issues, regardless of item quality. Suboptimal enchants — correct slot but wrong or budget enhancement — are additionally flagged if the item is ranked top 5 BiS for that player's spec across any phase. Items of that calibre are unlikely to be replaced, so a suboptimal enchant is treated the same as a missing one. On non-top-5 items, suboptimal enchants are not penalised, as the player may reasonably be saving for an upgrade. The penalty scales linearly: 5 issues is ×0.67, 10 issues is ×0.5.</div>
+          <div style="margin-top:8px;color:var(--text-dim);">Missing gems and missing enchants are always counted as gear issues, regardless of item quality. Suboptimal enchants — correct slot but wrong or budget enhancement — are additionally flagged if the item is ranked top 10 BiS for that player's spec across any phase. Items of that calibre are unlikely to be replaced, so a suboptimal enchant is treated the same as a missing one. On non-top-5 items, suboptimal enchants are not penalised, as the player may reasonably be saving for an upgrade. The penalty scales linearly: 5 issues is ×0.67, 10 issues is ×0.5.</div>
         </div>
 
         <div>
@@ -2397,7 +2397,7 @@ function isTop5BisItem(itemName, playerName) {
     if (!bisData[spec]) continue;
     for (const items of Object.values(bisData[spec])) {
       const entry = items.find(e => e[0] === itemId);
-      if (entry && entry[1] <= 5) return true;
+      if (entry && entry[1] <= 10) return true;
     }
   }
   return false;
@@ -2684,7 +2684,7 @@ function render({ dates, roles }) {
           <col style="width:24px;">  <!-- Gear flag -->
           <col style="width:64px;">  <!-- Loot Score -->
           <col style="width:70px;" class="wcl-col">  <!-- WCL -->
-          <col style="width:80px;">  <!-- Consumes -->
+          <col style="width:55px;">  <!-- Consumes -->
           <col>                      <!-- Raids (dots) -->
           <col style="width:50px;">  <!-- # -->
           <col style="width:60px;"> <!-- % -->
@@ -2696,7 +2696,7 @@ function render({ dates, roles }) {
             <th></th>
             <th data-col="points" onclick="setSort('${roleSafeId}', '${role.name}', 'points')" style="cursor:pointer;text-align:center;" title="Amount of loot received relative to raids attended.">Loot Score<span class="sort-arrow">${state.col==='points' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
             <th data-col="wcl" onclick="setSort('${roleSafeId}', '${role.name}', 'wcl')" style="cursor:pointer;text-align:center;" class="wcl-col">WCL<span class="sort-arrow">${state.col==='wcl' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
-            <th data-col="consumes" onclick="setSort('${roleSafeId}', '${role.name}', 'consumes')" style="cursor:pointer;text-align:center;" title="Uptime of all required consumables.">Consumes<span class="sort-arrow">${state.col==='consumes' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
+            <th data-col="consumes" onclick="setSort('${roleSafeId}', '${role.name}', 'consumes')" style="cursor:pointer;text-align:center;" title="Uptime of all required consumables.">Buffs<span class="sort-arrow">${state.col==='consumes' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
             <th style="text-align:center;" title="Raids attended. Color indicates consumable usage.">Raids</th>
             <th data-col="attendance" onclick="setSort('${roleSafeId}', '${role.name}', 'attendance')" style="cursor:pointer;text-align:center;">#<span class="sort-arrow">${state.col==='attendance' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
             <th data-col="pct" onclick="setSort('${roleSafeId}', '${role.name}', 'pct')" style="cursor:pointer;">Attendance %<span class="sort-arrow">${state.col==='pct' ? (state.dir==='desc' ? ' ▾' : ' ▴') : ' ⬦'}</span></th>
@@ -4480,7 +4480,7 @@ function onItemChange() {
           <th style="padding:6px 12px;"></th>
           ${thS('LS','points')}
           ${thS('WCL','wcl','center','wcl-col')}
-          ${thS('Consumes','consumes')}
+          ${thS('Buffs','consumes')}
           <th style="padding:6px 12px;text-align:center;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);" title="Raids attended. Color indicates consumable usage.">Raids</th>
           ${thS('#','attendance')}
           ${thS('%','pct','left')}
