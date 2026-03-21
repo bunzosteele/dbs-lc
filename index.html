@@ -4311,64 +4311,8 @@ function onItemChange() {
   const _maxPr = _prScores.filter(s => s > 0).length ? Math.max(..._prScores.filter(s => s > 0)) : 1;
   prNormFactor = _maxPr > 0 ? 100 / _maxPr : 1;
 
-  // ── RECOMMENDATION ─────────────────────────────────────────────────────────
-  // Determine if open roll or restricted, and who should roll
-  function computeRecommendation() {
-    // Resolve these locally since they're declared later in outer scope
-    const _candId = getItemId(item);
-    const _relSlots = getRelevantSlots(item);
-
-    // Score each needIt player
-    const scored = needIt.map(p => ({
-      p,
-      normPr: Math.round(lootPriorityScore(p) * prNormFactor),
-      epvPct: (() => {
-        const candidateEpv = getPlayerItemEpv(p.name, _candId);
-        if (!candidateEpv) return null;
-        const gear = gearListingByPlayer[normalizeName(p.name)]?.slots;
-        if (!gear || !_relSlots) return null;
-        const currentNames = _relSlots.map(slot => gear[slot]).filter(Boolean);
-        if (!currentNames.length) return null;
-        const currentEpvs = currentNames
-          .map(n => getPlayerItemEpv(p.name, getItemId(n, p.name)))
-          .filter(e => e !== null);
-        if (!currentEpvs.length) return null;
-        const currentEpv = currentEpvs.length > 1
-          ? currentEpvs.reduce((a, b) => a + b, 0)
-          : currentEpvs[0];
-        return currentEpv > 0 ? ((candidateEpv - currentEpv) / currentEpv) * 100 : null;
-      })(),
-    }));
-
-    // Open roll check: no active non-receiver has >5% EPV upgrade
-    const hasUpgrade = scored.some(s => s.epvPct !== null && s.epvPct > 5);
-    if (!hasUpgrade) return { type: 'open', rollers: [] };
-
-    // Restricted: apply gap algorithm to ALL needIt sorted by priority (ignore EPV)
-    const byPrio = scored
-      .filter(s => s.normPr > 0)
-      .sort((a, b) => b.normPr - a.normPr);
-
-    if (!byPrio.length) return { type: 'open', rollers: [] };
-    if (byPrio.length <= 2) return { type: 'restricted', rollers: byPrio };
-
-    // Find the largest relative gap >= 10% within the top 4
-    const topN = byPrio.slice(0, 4);
-    let cutIdx = topN.length; // default: all top-N roll
-    let biggestGap = -1;
-
-    for (let i = 0; i < topN.length - 1; i++) {
-      const gap = (topN[i].normPr - topN[i + 1].normPr) / topN[i].normPr;
-      if (gap >= 0.10 && gap > biggestGap) {
-        biggestGap = gap;
-        cutIdx = i + 1;
-      }
-    }
-
-    return { type: 'restricted', rollers: topN.slice(0, cutIdx) };
-  }
-
-  const recommendation = computeRecommendation();
+  // recommendation computed after WOWHEAD_SLOT_MAP and getRelevantSlots are defined
+  let recommendation = null;
 
   // Sort needIt by selected column
   function getLootSortVal(p, col) {
@@ -4601,6 +4545,46 @@ function onItemChange() {
   }
 
     const relevantSlots = getRelevantSlots(item);
+
+  // ── RECOMMENDATION ────────────────────────────────────────────────────────
+  function computeRecommendation() {
+    const _candId = getItemId(item);
+    const _relSlots = getRelevantSlots(item);
+    const scored = needIt.map(p => ({
+      p,
+      normPr: Math.round(lootPriorityScore(p) * prNormFactor),
+      epvPct: (() => {
+        const candidateEpv = getPlayerItemEpv(p.name, _candId);
+        if (!candidateEpv) return null;
+        const gear = gearListingByPlayer[normalizeName(p.name)]?.slots;
+        if (!gear || !_relSlots) return null;
+        const currentNames = _relSlots.map(slot => gear[slot]).filter(Boolean);
+        if (!currentNames.length) return null;
+        const currentEpvs = currentNames
+          .map(n => getPlayerItemEpv(p.name, getItemId(n, p.name)))
+          .filter(e => e !== null);
+        if (!currentEpvs.length) return null;
+        const currentEpv = currentEpvs.length > 1
+          ? currentEpvs.reduce((a, b) => a + b, 0)
+          : currentEpvs[0];
+        return currentEpv > 0 ? ((candidateEpv - currentEpv) / currentEpv) * 100 : null;
+      })(),
+    }));
+    const hasUpgrade = scored.some(s => s.epvPct !== null && s.epvPct > 5);
+    if (!hasUpgrade) return { type: 'open', rollers: [] };
+    const byPrio = scored.filter(s => s.normPr > 0).sort((a, b) => b.normPr - a.normPr);
+    if (!byPrio.length) return { type: 'open', rollers: [] };
+    if (byPrio.length <= 2) return { type: 'restricted', rollers: byPrio };
+    const topN = byPrio.slice(0, 4);
+    let cutIdx = topN.length;
+    let biggestGap = -1;
+    for (let i = 0; i < topN.length - 1; i++) {
+      const gap = (topN[i].normPr - topN[i + 1].normPr) / topN[i].normPr;
+      if (gap >= 0.10 && gap > biggestGap) { biggestGap = gap; cutIdx = i + 1; }
+    }
+    return { type: 'restricted', rollers: topN.slice(0, cutIdx) };
+  }
+  recommendation = computeRecommendation();
 
   function lootPlayerRow(p, dimmed, badge) {
     const key = normalizeName(p.name);
