@@ -3923,12 +3923,14 @@ function onItemChange() {
       return `<span style="${iw}font-size:14px;color:#d4a017;" title="Current item is not on the BiS list for this player's spec">⚠</span>`;
     } else if (candidateEpv !== null && currentEpv !== null) {
       const delta = candidateEpv - currentEpv;
-      const tip = `Candidate EPV: ${candidateEpv.toFixed(1)} | Current EPV: ${currentEpv.toFixed(1)} | Delta: ${delta >= 0 ? '+' : ''}${delta.toFixed(1)}`;
-      if (delta >= 20)      return `<span style="${iw}font-size:16px;color:#4caa6e;" title="${tip}">⇑</span>`;
-      else if (delta >= 5)  return `<span style="${iw}font-size:16px;color:#8abf50;" title="${tip}">↑</span>`;
-      else if (delta <= -20) return `<span style="${iw}font-size:16px;color:#c94c4c;" title="${tip}">⇓</span>`;
-      else if (delta <= -5) return `<span style="${iw}font-size:16px;color:#e07040;" title="${tip}">↓</span>`;
-      else                  return `<span style="${iw}font-size:16px;color:var(--text-dim);" title="${tip}">→</span>`;
+      const pct = currentEpv > 0 ? (delta / currentEpv) * 100 : 0;
+      const pctStr = (delta >= 0 ? '+' : '') + pct.toFixed(1) + '%';
+      const tip = `Candidate EPV: ${candidateEpv.toFixed(1)} | Current EPV: ${currentEpv.toFixed(1)} | Delta: ${delta >= 0 ? '+' : ''}${delta.toFixed(1)} (${pctStr})`;
+      if (pct >= 20)       return `<span style="${iw}font-size:16px;color:#4caa6e;" title="${tip}">⇑</span>`;
+      else if (pct >= 5)   return `<span style="${iw}font-size:16px;color:#8abf50;" title="${tip}">↑</span>`;
+      else if (pct <= -20) return `<span style="${iw}font-size:16px;color:#c94c4c;" title="${tip}">⇓</span>`;
+      else if (pct <= -5)  return `<span style="${iw}font-size:16px;color:#e07040;" title="${tip}">↓</span>`;
+      else                 return `<span style="${iw}font-size:16px;color:var(--text-dim);" title="${tip}">→</span>`;
     }
     return `<span style="${iw}"></span>`; // empty spacer
   }
