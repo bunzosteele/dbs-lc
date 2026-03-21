@@ -3806,40 +3806,50 @@ function onItemChange() {
   }
 
   // BiS upgrade multiplier — applied after hard/soft prio, before normalization
+  // All candidate variables are computed lazily inside to avoid TDZ issues
   function bisMultiplier(p) {
     const key = normalizeName(p.name);
     const playerName = p.name;
 
+    // Compute candidate info lazily
+    const _candidateItemId = getItemId(item);
+    if (!_candidateItemId) return { mult: 1, reason: null };
+
     // Skip if candidate not on anyone's BiS list
-    if (!candidateOnBisForAnyone) return { mult: 1, reason: null };
+    const _onAnyBis = Object.values(bisData).some(slots =>
+      Object.values(slots).some(items => items.some(([id]) => id === _candidateItemId))
+    );
+    if (!_onAnyBis) return { mult: 1, reason: null };
 
     // Get candidate EPV for this player
-    const candidateEpv = getPlayerItemEpv(playerName, candidateItemId);
+    const candidateEpv = getPlayerItemEpv(playerName, _candidateItemId);
 
     // Candidate not on this player's BiS list but on others' — .5x
     if (candidateEpv === null) return { mult: 0.5, reason: 'Not on BiS list for spec (×0.5)' };
 
     // Get current item(s) in relevant slots
     const gear = gearListingByPlayer[key]?.slots;
-    if (!gear || !relevantSlots || relevantSlots[0] === '__unknown__') return { mult: 1, reason: null };
+    const _slots = getRelevantSlots(item);
+    if (!gear || !_slots || _slots[0] === '__unknown__') return { mult: 1, reason: null };
 
-    const currentNames = relevantSlots.map(slot => gear[slot]).filter(Boolean);
+    const currentNames = _slots.map(slot => gear[slot]).filter(Boolean);
     if (!currentNames.length) return { mult: 1, reason: null };
 
-    // For two-hand candidates, sum EPVs of current MH+OH
+    // Detect two-hand candidate
+    const _isTwoHand = Object.values(bisData).some(slots =>
+      (slots['Two Hand'] || []).some(([id]) => id === _candidateItemId)
+    );
+
     let currentEpv = null;
-    if (candidateIsTwoHand && currentNames.length > 1) {
-      const epvs = currentNames.map(n => getPlayerItemEpv(playerName, getItemId(n))).filter(e => e !== null);
-      // Skip modifier if main hand current item not on BiS
+    if (_isTwoHand && currentNames.length > 1) {
       const mhEpv = getPlayerItemEpv(playerName, getItemId(currentNames[0]));
       if (mhEpv === null) return { mult: 1, reason: null };
+      const epvs = currentNames.map(n => getPlayerItemEpv(playerName, getItemId(n))).filter(e => e !== null);
       currentEpv = epvs.reduce((a, b) => a + b, 0);
     } else {
-      // Use first current item found; skip if not on BiS
       for (const name of currentNames) {
-        const id = getItemId(name);
-        const epv = getPlayerItemEpv(playerName, id);
-        if (epv === null) return { mult: 1, reason: null }; // current not on BiS — skip modifier
+        const epv = getPlayerItemEpv(playerName, getItemId(name));
+        if (epv === null) return { mult: 1, reason: null };
         currentEpv = epv;
         break;
       }
