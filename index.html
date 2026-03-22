@@ -1662,7 +1662,6 @@ function parsePoints(text) {
 // Count how many distinct BiS lists (spec+slot combos, any phase) an item appears on
 function getBisListCount(itemId) {
   if (!itemId) return 0;
-  // For token items, count all reward item IDs across all specs
   const rewardIds = TOKEN_REWARDS[itemId]
     ? new Set(Object.values(TOKEN_REWARDS[itemId]))
     : new Set([itemId]);
@@ -1673,6 +1672,38 @@ function getBisListCount(itemId) {
     }
   }
   return count;
+}
+
+// For tokens: count active (non-inactive) roster players whose spec can use any reward
+// Falls back to getBisListCount for non-token items
+// Must be called after lastRenderData is populated
+function getEffectiveListCount(itemId) {
+  if (!itemId) return 0;
+  if (!TOKEN_REWARDS[itemId]) return getBisListCount(itemId);
+
+  // Determine which specs can use this token's rewards
+  const rewardIds = new Set(Object.values(TOKEN_REWARDS[itemId]));
+  const eligibleSpecs = new Set();
+  for (const [spec, slots] of Object.entries(bisData)) {
+    for (const items of Object.values(slots)) {
+      if (items.some(([id]) => rewardIds.has(id))) {
+        eligibleSpecs.add(spec);
+        break;
+      }
+    }
+  }
+
+  // Count active players whose spec is eligible
+  let count = 0;
+  for (const role of (lastRenderData.roles || [])) {
+    for (const p of role.players) {
+      if (p.inactive) continue;
+      const specs = getPlayerBisSpecs(p.name);
+      if (specs.some(s => eligibleSpecs.has(s))) count++;
+    }
+  }
+  // Fall back to BiS list count if roster data isn't loaded yet
+  return count || getBisListCount(itemId);
 }
 
 // Get the weighted EPV for an item for a player: player's EPV × number of BiS lists it appears on
@@ -1711,38 +1742,10 @@ function getEpvDerivedRank(itemId, slotItems) {
 }
 
 function getBisRankScore(itemId) {
-  // Average of 1/epvRank across all BiS lists the item (or token rewards) appears on
-  // EPV rank = position when items are sorted by EPV descending (ignoring stored rank field)
-  // For token items: compute per-reward then average across rewards
-  const rewardIds = TOKEN_REWARDS[itemId]
-    ? [...new Set(Object.values(TOKEN_REWARDS[itemId]))]
-    : [itemId];
-  const isToken = !!TOKEN_REWARDS[itemId];
-
-  if (isToken) {
-    const rewardScores = rewardIds.map(rid => {
-      const ranks = [];
-      for (const slots of Object.values(bisData)) {
-        for (const slotItems of Object.values(slots)) {
-          if (!slotItems.some(e => e[0] === rid)) continue;
-          const r = getEpvDerivedRank(rid, slotItems);
-          if (r !== null) ranks.push(r);
-        }
-      }
-      return ranks.length ? ranks.reduce((s, r) => s + 1/r, 0) / ranks.length : 0;
-    }).filter(s => s > 0);
-    return rewardScores.length ? rewardScores.reduce((a, b) => a + b, 0) / rewardScores.length : 0;
-  } else {
-    const ranks = [];
-    for (const slots of Object.values(bisData)) {
-      for (const slotItems of Object.values(slots)) {
-        if (!slotItems.some(e => e[0] === itemId)) continue;
-        const r = getEpvDerivedRank(itemId, slotItems);
-        if (r !== null) ranks.push(r);
-      }
-    }
-    return ranks.length ? ranks.reduce((s, r) => s + 1/r, 0) / ranks.length : 0;
-  }
+  // Returns avg 1/epvRank for tooltip display
+  // The actual weighted formula uses avg^1.5 * best^0.5 via getBisRankScoreComponents
+  const { avg } = getBisRankScoreComponents(itemId);
+  return avg;
 }
 
 function isTwoHandedItem(itemId) {
@@ -1767,15 +1770,53 @@ function getMaxItemEpv(itemId) {
   return best;
 }
 
+function getBisRankScoreComponents(itemId) {
+  // Returns { avg, best } where:
+  //   avg  = average of 1/epvRank across all BiS list appearances
+  //   best = 1.0 if item ever appears in top 3 on any list, otherwise actual best 1/rank
+  const rewardIds = TOKEN_REWARDS[itemId]
+    ? [...new Set(Object.values(TOKEN_REWARDS[itemId]))]
+    : [itemId];
+  const isToken = !!TOKEN_REWARDS[itemId];
+
+  let allRanks = [];
+  if (isToken) {
+    for (const rid of rewardIds) {
+      for (const slots of Object.values(bisData)) {
+        for (const slotItems of Object.values(slots)) {
+          if (!slotItems.some(e => e[0] === rid)) continue;
+          const r = getEpvDerivedRank(rid, slotItems);
+          if (r !== null) allRanks.push(r);
+        }
+      }
+    }
+  } else {
+    for (const slots of Object.values(bisData)) {
+      for (const slotItems of Object.values(slots)) {
+        if (!slotItems.some(e => e[0] === itemId)) continue;
+        const r = getEpvDerivedRank(itemId, slotItems);
+        if (r !== null) allRanks.push(r);
+      }
+    }
+  }
+  if (!allRanks.length) return { avg: 0, best: 0 };
+  const invRanks = allRanks.map(r => 1 / r);
+  const avg = invRanks.reduce((s, v) => s + v, 0) / invRanks.length;
+  const bestRank = Math.min(...allRanks);
+  const best = bestRank <= 3 ? 1.0 : Math.max(...invRanks);
+  return { avg, best };
+}
+
 function getWeightedItemEpv(playerName, itemId) {
   const epv = getMaxItemEpv(itemId);
   if (!epv) return 0;
-  const listCount = getBisListCount(itemId);
+  const listCount = getEffectiveListCount(itemId);
   if (!listCount) return 0;
   const logMult = Math.log(listCount + 1) / Math.log(BIS_LOG_BASE);
-  const rankScore = getBisRankScore(itemId);
+  const { avg, best } = getBisRankScoreComponents(itemId);
+  const rankScore = Math.pow(avg, 1.5) * Math.pow(best, 0.5);
   const twoHandPenalty = isTwoHandedItem(itemId) ? 0.5 : 1.0;
-  return epv * logMult * Math.pow(rankScore, BIS_RANK_EXP) * twoHandPenalty;
+  return epv * logMult * rankScore * twoHandPenalty;
 }
 
 function computePointsByPlayer(roles) {
@@ -2731,9 +2772,9 @@ function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, point
           <td class="priority-cell">${(() => {
             const { score, tooltip } = calculatePriority(p, bottom20threshold, top20threshold, pointValues);
             if (!score) return '<span style="color:var(--text-dim);font-style:italic;font-size:12px;">—</span>';
-            const normScore = Math.round(score * priorityNorm * 10) / 10;
+            const normScore = Math.round(score * priorityNorm);
             const col = priorityColor(normScore);
-            const displayStr = normScore % 1 === 0 ? normScore.toFixed(0) : normScore.toFixed(1);
+            const displayStr = normScore.toFixed(0);
             const fullTip = tooltip + `&#10;Score: ${score.toFixed(2)}`;
             return `<span class="priority-score" style="color:${col};" title="${fullTip}">${displayStr}</span>`;
           })()}</td>
@@ -2957,10 +2998,11 @@ function toggleLoot(td, playerName) {
       const weightedEpv = itemId ? getWeightedItemEpv(playerName, itemId) : 0;
       const col = lootValueColor(weightedEpv);
       const listCount = itemId ? getBisListCount(itemId) : 0;
-      const logMult = listCount ? (Math.log(listCount + 1) / Math.log(BIS_LOG_BASE)) : 0;
-      const rankScore = itemId ? getBisRankScore(itemId) : 0;
+      const effListCount = itemId ? getEffectiveListCount(itemId) : 0;
+      const logMult = effListCount ? (Math.log(effListCount + 1) / Math.log(BIS_LOG_BASE)) : 0;
+      const { avg: rankAvg, best: rankBest } = itemId ? getBisRankScoreComponents(itemId) : { avg: 0, best: 0 };
       const _is2h = itemId ? isTwoHandedItem(itemId) : false;
-      const epvTip = ` title="EPV: ${epv ? epv.toFixed(1) : '0'} × ${logMult.toFixed(2)} (log ${listCount} lists) × ${rankScore.toFixed(3)}^2 (rank)${_is2h ? ' × 0.5 (2H)' : ''} = ${weightedEpv.toFixed(1)}"`;
+      const epvTip = ` title="EPV: ${epv ? epv.toFixed(1) : '0'} × ${logMult.toFixed(2)} (log ${effListCount} players) × avg^1.5(${rankAvg.toFixed(3)})×best^0.5(${rankBest.toFixed(2)})${_is2h ? ' × 0.5 (2H)' : ''} = ${weightedEpv.toFixed(1)}"`;
       return `<span class="loot-item" style="border-color:${col};background:${col}18;"${epvTip}>${itemLink(name, name)}</span>`;
     }).join('')}</div>`;
   }
