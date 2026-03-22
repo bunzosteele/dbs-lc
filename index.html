@@ -1129,7 +1129,12 @@
             LootMod = 1.0 − percentile × 0.667
           </div>
           <div style="margin-top:8px;color:var(--text-dim);">
-            Loot Score = sum of weighted EPV across all items received ÷ raids attended, rounded to the nearest integer. Each item's weighted EPV = avgEPV × log(N+1)/log(3) × avg(1/rank)^1.5 × best^0.5 × 2H-penalty. For tokens, avgEPV = average of best EPV across all unique reward items; for others, max EPV. N = active roster players who can use the item (each player counted once regardless of spec count); for tokens, capped at unique reward count to reflect rarity. EPV rank is derived from EPV values, not stored rank. best = max(0.1, 1.0 − (bestRank − 3) × 0.1): top 3 scores 1.0, decaying by 0.1 per rank beyond 3, floored at 0.1. Two-handed weapons receive a ×0.5 penalty. Items not on any BiS list contribute 0. Dividing by raids attended normalises for tenure.<br><br>
+            Loot Score = sum of weighted EPV across all items received ÷ raids attended.<br><br>
+            Each item's weighted EPV = EPV × log(N+1)/log(3) × avg_quality^1.5 × peak_quality^0.5 × 2H-penalty.<br><br>
+            <b>N</b>: the number of active raiders whose spec has the item on their BiS list, counted once per player regardless of how many specs qualify. For tier tokens, capped at the number of unique class rewards to reflect that tokens are guaranteed drops shared across many classes.<br><br>
+            <b>avg_quality</b>: average desirability across all specs that want the item — higher for items that are broadly strong, lower for items that are filler for most specs.<br><br>
+            <b>peak_quality</b>: how good the item is for the spec that wants it most. Scores 1.0 if the item is top 3 for any spec, then decays by 0.1 per position beyond 3rd, floored at 0.1.<br><br>
+            Two-handed weapons receive a ×0.5 penalty to account for their inflated base EPV. Items not on any BiS list contribute 0. Dividing by raids attended normalises for tenure so veterans who received little are not penalised relative to newer raiders.<br><br>
             The modifier is a continuous curve within each role group. The player at the lowest percentile receives ×1.0 — no penalty. The player at the highest percentile receives ×0.33.
           </div>
         </div>
@@ -3025,7 +3030,8 @@ function toggleLoot(td, playerName) {
       const _is2h = itemId ? isTwoHandedItem(itemId) : false;
       const _isToken = itemId ? !!TOKEN_REWARDS[itemId] : false;
       const _nLabel = _isToken ? `${effListCount} rewards (capped)` : `${effListCount} players`;
-      const epvTip = ` title="avgEPV: ${epv ? epv.toFixed(1) : '0'} × ${logMult.toFixed(2)} (log ${_nLabel}) × avg^1.5(${rankAvg.toFixed(3)}) × best(${rankBest.toFixed(2)})^0.5${_is2h ? ' × 0.5 (2H)' : ''} = ${weightedEpv.toFixed(1)}"`;
+      const _epvLabel = _isToken ? 'avgEPV' : 'maxEPV';
+      const epvTip = ` title="${_epvLabel}: ${epv ? epv.toFixed(1) : '0'} × ${logMult.toFixed(2)} (log ${_nLabel}) × avg^1.5(${rankAvg.toFixed(3)}) × best(${rankBest.toFixed(2)})^0.5${_is2h ? ' × 0.5 (2H)' : ''} = ${weightedEpv.toFixed(1)}"`;
       return `<span class="loot-item" style="border-color:${col};background:${col}18;"${epvTip}>${itemLink(name, name)}</span>`;
     }).join('')}</div>`;
   }
