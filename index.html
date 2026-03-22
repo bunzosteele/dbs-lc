@@ -1129,7 +1129,7 @@
             LootMod = 1.0 − percentile × 0.667
           </div>
           <div style="margin-top:8px;color:var(--text-dim);">
-            Loot Score = sum of BiS EPV across all items received ÷ raids attended, rounded to the nearest integer. Each received item is looked up against the player's all-phases BiS list — items not on any BiS list contribute 0 EPV. Dividing by raids attended normalises for tenure so a veteran who received little is not penalised against a newer raider who received a similar amount.<br><br>
+            Loot Score = sum of weighted EPV across all items received ÷ raids attended, rounded to the nearest integer. Each item's weighted EPV = player's EPV for that item × the number of BiS lists it appears on across all specs. Items contested by many specs (e.g. a ring on 8 BiS lists) are worth more than items only one spec wants. Items not on any BiS list contribute 0. Dividing by raids attended normalises for tenure.<br><br>
             The modifier is a continuous curve within each role group. The player at the lowest percentile receives ×1.0 — no penalty. The player at the highest percentile receives ×0.33.
           </div>
         </div>
@@ -1662,6 +1662,26 @@ function parsePoints(text) {
 
 // Compute loot score points from loot received + BiS EPV + raids attended
 // Replaces the sheet-derived pointsByPlayer after render data is available
+// Count how many distinct BiS lists (spec+slot combos, any phase) an item appears on
+function getBisListCount(itemId) {
+  if (!itemId) return 0;
+  let count = 0;
+  for (const slots of Object.values(bisData)) {
+    for (const items of Object.values(slots)) {
+      if (items.some(([id]) => id === itemId)) count++;
+    }
+  }
+  return count;
+}
+
+// Get the weighted EPV for an item for a player: player's EPV × number of BiS lists it appears on
+function getWeightedItemEpv(playerName, itemId) {
+  const epv = getPlayerItemEpv(playerName, itemId);
+  if (!epv) return 0;
+  const listCount = getBisListCount(itemId);
+  return epv * (listCount || 1);
+}
+
 function computePointsByPlayer(roles) {
   const computed = {};
   for (const role of roles) {
@@ -1673,9 +1693,7 @@ function computePointsByPlayer(roles) {
         const itemName = typeof entry === 'object' ? entry.name : entry;
         const itemId = getItemId(itemName, p.name);
         if (!itemId) continue;
-        // Use all-phases EPV for the player's spec
-        const epv = getPlayerItemEpv(p.name, itemId);
-        if (epv) totalEpv += epv;
+        totalEpv += getWeightedItemEpv(p.name, itemId);
       }
       const attended = p.attended || 1;
       computed[key] = Math.round(totalEpv / attended);
@@ -2841,7 +2859,9 @@ function toggleLoot(td, playerName) {
       const col = lootValueColor(value);
       const itemId = getItemId(name, playerName);
       const epv = itemId ? getPlayerItemEpv(playerName, itemId) : null;
-      const epvTip = epv ? ` title="EPV: ${epv.toFixed(1)}"` : '';
+      const weightedEpv = itemId ? getWeightedItemEpv(playerName, itemId) : 0;
+      const listCount = itemId ? getBisListCount(itemId) : 0;
+      const epvTip = ` title="EPV: ${epv ? epv.toFixed(1) : '0'} × ${listCount || 1} lists = ${weightedEpv.toFixed(1)}"`;
       return `<span class="loot-item" style="border-color:${col};background:${col}18;"${epvTip}>${itemLink(name, name)}</span>`;
     }).join('')}</div>`;
   }
