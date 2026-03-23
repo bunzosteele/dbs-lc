@@ -1465,7 +1465,9 @@ function rebuildGlossaryData() {
           eligibleRoles: [], // derived from roleValues keys
           hardPrio: [], // legacy — replaced by prioritization
           softPrio: [], // legacy — replaced by prioritization
-          prioritization: entry.prioritization || [],
+          prioritization: (entry.prioritization || []).map(p =>
+            p.conditions ? p : { conditions: [p.target], multiplier: p.multiplier }
+          ),
           roleValues: entry.roleValues || {},
         });
       }
@@ -3772,29 +3774,23 @@ function renderGlossaryPanel() {
             : ''}
           <span id="glItemText">${item || '— Select Item —'}</span>
         </div>
-        <div id="glItemDropdown" class="loot-item-dropdown" style="display:none;">
-          ${items.map(i => {
-            const iid = getItemId(i);
-            const ico = iid && itemIcons[iid] ? `<img src="https://wow.zamimg.com/images/wow/icons/small/${itemIcons[iid]}.jpg" />` : '';
-            return `<div class="loot-item-option ${i===item?'selected':''}" onclick="glossarySelectItemCustom('${i.replace(/'/g,"\'")}')">
-              ${ico}<span>${i}</span>
-            </div>`;
-          }).join('')}
-        </div>
+        <div id="glItemDropdown" class="loot-item-dropdown" style="display:none;"></div>
       </div>
     </div>
     <div style="padding:0 0 16px;">
 
+      ${entry ? (() => {
+        const _eid = entry ? getItemId(entry.item) : null;
+        const _eico = _eid ? itemIcons[_eid] : null;
+        const _icoHtml = _eico
+          ? '<a href="https://www.wowhead.com/tbc/item=' + _eid + '" data-wowhead="item=' + _eid + '&dataset=tbc" target="_blank" rel="noopener" style="flex-shrink:0;"><img src="https://wow.zamimg.com/images/wow/icons/large/' + _eico + '.jpg" style="width:40px;height:40px;border:2px solid var(--gold-dim);border-radius:4px;display:block;" /></a>'
+          : '';
+        const _nameHtml = _eid
+          ? '<a href="https://www.wowhead.com/tbc/item=' + _eid + '" data-wowhead="item=' + _eid + '&dataset=tbc" target="_blank" rel="noopener" style="font-family:\'Cinzel\',serif;font-size:18px;color:var(--gold);text-decoration:none;">' + entry.item + '</a>'
+          : '<span style="font-family:\'Cinzel\',serif;font-size:18px;color:var(--gold);">' + entry.item + '</span>';
+        return '<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">' + _icoHtml + _nameHtml + '</div>';
+      })() : ''}
       ${entry ? `
-      <!-- Item header with icon -->
-      ${(() => {
-        const _eid = getItemId(entry.item);
-        const _eico = _eid && itemIcons[_eid];
-        return _eid ? `<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
-          ${_eico ? `<a href="https://www.wowhead.com/tbc/item=${_eid}" data-wowhead="item=${_eid}&dataset=tbc" target="_blank" rel="noopener" style="flex-shrink:0;"><img src="https://wow.zamimg.com/images/wow/icons/large/${_eico}.jpg" style="width:40px;height:40px;border:2px solid var(--gold-dim);border-radius:4px;display:block;" /></a>` : ''}
-          <a href="https://www.wowhead.com/tbc/item=${_eid}" data-wowhead="item=${_eid}&dataset=tbc" target="_blank" rel="noopener" style="font-family:'Cinzel',serif;font-size:18px;color:var(--gold);text-decoration:none;">${entry.item}</a>
-        </div>` : '';
-      })()}
       <!-- Item detail -->
       <div style="display:flex;flex-direction:column;gap:16px;">
 
@@ -3834,9 +3830,10 @@ function renderGlossaryPanel() {
               <th style="padding:4px;"></th>
             </tr></thead>
             <tbody>
-              ${(entry.prioritization||[]).map((pr,i) => `
-              <tr style="border-bottom:1px solid var(--border)20;">
-                <td style="padding:6px 10px;color:var(--text);">${pr.target}</td>
+              ${(entry.prioritization||[]).map((pr,i) => {
+              const conds = pr.conditions || (pr.target ? [pr.target] : []);
+              return `<tr style="border-bottom:1px solid var(--border)20;">
+                <td style="padding:6px 10px;color:var(--text);">${conds.join('<span style="color:var(--text-dim);margin:0 4px;">+</span>')}</td>
                 <td style="padding:6px 10px;">
                   <select onchange="glossaryUpdatePrioMult(${i}, this.value)" style="background:var(--bg);border:1px solid var(--border);color:var(--gold);padding:3px 6px;border-radius:4px;font-size:13px;">
                     ${MULTS.map(m => `<option value="${m}" ${pr.multiplier==m?'selected':''}>×${m}</option>`).join('')}
@@ -3845,23 +3842,32 @@ function renderGlossaryPanel() {
                 <td style="padding:6px 4px;text-align:right;">
                   <button onclick="glossaryRemovePrio(${i})" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;padding:2px 6px;">✕</button>
                 </td>
-              </tr>`).join('')}
+              </tr>`;
+            }).join('')}
             </tbody>
           </table>` : `<p style="font-size:13px;color:var(--text-dim);margin:0 0 12px;">No prioritization set.</p>`}
-          <!-- Add prio -->
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <select id="glPrioType" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;" onchange="glossaryUpdatePrioTargetOptions()">
-              <option value="role">Role</option>
-              <option value="class">Class</option>
-              <option value="player">Player</option>
-            </select>
-            <select id="glPrioTarget" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;">
-              ${ROLES.map(r => `<option value="${r}">${r}</option>`).join('')}
-            </select>
-            <select id="glPrioMult" style="background:var(--bg);border:1px solid var(--border);color:var(--gold);padding:6px 10px;border-radius:4px;font-size:13px;">
-              ${MULTS.map(m => `<option value="${m}" ${m===1.75?'selected':''}>×${m}</option>`).join('')}
-            </select>
-            <button onclick="glossaryAddPrio()" style="background:var(--gold-dim);border:none;color:var(--bg);padding:7px 14px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;">ADD</button>
+          <!-- Add prio — supports multiple conditions with AND logic -->
+          <div style="background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:10px 12px;">
+            <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px;">Add conditions (ALL must match)</div>
+            <div id="glPrioConditions" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;"></div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <select id="glPrioType" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:13px;" onchange="glossaryUpdatePrioTargetOptions()">
+                <option value="role">Role</option>
+                <option value="class">Class</option>
+                <option value="player">Player</option>
+              </select>
+              <select id="glPrioTarget" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:13px;">
+                ${ROLES.map(r => `<option value="${r}">${r}</option>`).join('')}
+              </select>
+              <button onclick="glossaryAddCondition()" style="background:none;border:1px solid var(--border);color:var(--text-dim);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;">+ Add condition</button>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-top:10px;">
+              <label style="font-size:12px;color:var(--text-dim);">Multiplier:</label>
+              <select id="glPrioMult" style="background:var(--bg2);border:1px solid var(--border);color:var(--gold);padding:5px 8px;border-radius:4px;font-size:13px;">
+                ${MULTS.map(m => `<option value="${m}" ${m===1.75?'selected':''}>×${m}</option>`).join('')}
+              </select>
+              <button onclick="glossaryAddPrio()" style="background:var(--gold-dim);border:none;color:var(--bg);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;margin-left:auto;">ADD PRIO</button>
+            </div>
           </div>
         </div>
 
@@ -3887,6 +3893,24 @@ function renderGlossaryPanel() {
     </div>
     </div>
   `;
+  // Re-render any pending conditions that exist (survives re-render)
+  setTimeout(_glossaryRenderPendingConditions, 0);
+  // Populate glossary item dropdown imperatively (avoids escaping issues with item names)
+  const _glDd = document.getElementById('glItemDropdown');
+  if (_glDd) {
+    _glDd.innerHTML = '';
+    for (const _glItem of items) {
+      const _glId = getItemId(_glItem);
+      const _glOpt = document.createElement('div');
+      _glOpt.className = 'loot-item-option' + (_glItem === item ? ' selected' : '');
+      const _glIco = _glId && itemIcons[_glId]
+        ? '<img src="https://wow.zamimg.com/images/wow/icons/small/' + itemIcons[_glId] + '.jpg" />'
+        : '';
+      _glOpt.innerHTML = _glIco + '<span>' + _glItem + '</span>';
+      _glOpt.onclick = (function(n){ return function(){ glossarySelectItemCustom(n); }; })(_glItem);
+      _glDd.appendChild(_glOpt);
+    }
+  }
   setTimeout(() => { if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks(); }, 100);
 }
 
@@ -3911,6 +3935,7 @@ function toggleGlossaryItemDropdown() {
 }
 function glossarySelectItemCustom(itemName) {
   _glossaryState.item = itemName;
+  _glossaryPendingConditions = [];
   const dd = document.getElementById('glItemDropdown');
   if (dd) dd.style.display = 'none';
   renderGlossaryPanel();
@@ -3958,6 +3983,9 @@ function glossarySaveNotes() {
   renderGlossaryPanel();
 }
 
+// Pending conditions being built for a new prio entry
+let _glossaryPendingConditions = [];
+
 function glossaryUpdatePrioTargetOptions() {
   const type = document.getElementById('glPrioType')?.value;
   const sel  = document.getElementById('glPrioTarget');
@@ -3969,20 +3997,61 @@ function glossaryUpdatePrioTargetOptions() {
   sel.innerHTML = opts.map(o => `<option value="${o}">${o}</option>`).join('');
 }
 
+function glossaryAddCondition() {
+  const val = document.getElementById('glPrioTarget')?.value;
+  if (!val || _glossaryPendingConditions.includes(val)) return;
+  _glossaryPendingConditions.push(val);
+  _glossaryRenderPendingConditions();
+}
+
+function _glossaryRenderPendingConditions() {
+  const el = document.getElementById('glPrioConditions');
+  if (!el) return;
+  if (!_glossaryPendingConditions.length) {
+    el.innerHTML = '';
+    return;
+  }
+  el.innerHTML = '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">' +
+    _glossaryPendingConditions.map((c, i) =>
+      `<span style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:3px 8px;font-size:13px;display:flex;align-items:center;gap:6px;">
+        ${c}
+        <button onclick="glossaryRemoveCondition(${i})" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:11px;padding:0;line-height:1;">✕</button>
+      </span>`
+    ).join('<span style="color:var(--text-dim);font-size:12px;">AND</span>') +
+    '</div>';
+}
+
+function glossaryRemoveCondition(idx) {
+  _glossaryPendingConditions.splice(idx, 1);
+  _glossaryRenderPendingConditions();
+}
+
 function glossaryAddPrio() {
   const entry = _currentGlossaryEntry();
   if (!entry) return;
-  const target = document.getElementById('glPrioTarget')?.value;
-  const mult   = parseFloat(document.getElementById('glPrioMult')?.value);
-  if (!target || isNaN(mult)) return;
+  // Use pending conditions; if none, use current target selector as single condition
+  let conditions = [..._glossaryPendingConditions];
+  if (!conditions.length) {
+    const val = document.getElementById('glPrioTarget')?.value;
+    if (val) conditions = [val];
+  }
+  const mult = parseFloat(document.getElementById('glPrioMult')?.value);
+  if (!conditions.length || isNaN(mult)) return;
   if (!entry.prioritization) entry.prioritization = [];
-  // Stack with existing if same target
-  const existing = entry.prioritization.find(p => p.target === target);
+  // Stack with existing if same conditions set
+  const condKey = conditions.slice().sort().join('|');
+  const existing = entry.prioritization.find(p => {
+    const ec = (p.conditions || (p.target ? [p.target] : [])).slice().sort().join('|');
+    return ec === condKey;
+  });
   if (existing) {
     existing.multiplier = Math.round(existing.multiplier * mult * 10000) / 10000;
+    existing.conditions = conditions;
+    delete existing.target;
   } else {
-    entry.prioritization.push({ target, multiplier: mult });
+    entry.prioritization.push({ conditions, multiplier: mult });
   }
+  _glossaryPendingConditions = [];
   rebuildGlossaryData();
   saveGlossaryToGitHub();
   renderGlossaryPanel();
@@ -5047,7 +5116,8 @@ function onItemChange() {
   // prScores and normFactor computed after bisMultiplier is defined below
   let prNormFactor = 1; // will be set after bisMultiplier definition
 
-  // Prio multiplier helper — uses new prioritization array from loot-glossary.json
+  // Prio multiplier helper — uses conditions array with AND logic
+  // Each prio entry has conditions: [c1, c2, ...] — ALL must match (class, role, or player name)
   function prioMultiplier(p) {
     const cls  = classMap[normalizeName(p.name)] || '';
     const role = lastRenderData.roles.find(r => r.players.some(rp => normalizeName(rp.name) === normalizeName(p.name)))?.name || '';
@@ -5056,13 +5126,17 @@ function onItemChange() {
     let mult = 1;
     const labels = [];
     for (const pr of prios) {
-      const t = pr.target?.trim() || '';
-      const matches = t.toLowerCase() === cls.toLowerCase() ||
-                      t.toLowerCase() === role.toLowerCase() ||
-                      normalizeName(t) === normalizeName(p.name);
-      if (matches) {
+      const conditions = pr.conditions || (pr.target ? [pr.target] : []);
+      if (!conditions.length) continue;
+      const allMatch = conditions.every(c => {
+        const ct = c.trim();
+        return ct.toLowerCase() === cls.toLowerCase() ||
+               ct.toLowerCase() === role.toLowerCase() ||
+               normalizeName(ct) === normalizeName(p.name);
+      });
+      if (allMatch) {
         mult *= pr.multiplier;
-        labels.push(`${t}×${pr.multiplier}`);
+        labels.push(conditions.join(' + ') + ' ×' + pr.multiplier);
       }
     }
     return { mult, labels };
