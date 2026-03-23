@@ -1166,10 +1166,10 @@
         </div>
 
         <div>
-          <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:8px;">ALTERNATIVES MODIFIER <span style="color:var(--text-dim);font-weight:400;">(×0.70 – ×1.0)</span></div>
+          <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:8px;">ALTERNATIVES MODIFIER <span style="color:var(--text-dim);font-weight:400;">(×0.71 – ×1.0)</span></div>
           <div style="font-family:monospace;font-size:12px;background:var(--bg2);padding:8px 12px;border-left:2px solid var(--gold-dim);color:var(--text-dim);">
-            AltMod = 1 / (1 + log2(alts + 1) × 0.124)<br>
-            0 alts → ×1.0 &nbsp;|&nbsp; 3 alts → ×0.80 &nbsp;|&nbsp; 10 alts → ×0.70 (soft cap)
+            AltMod = 1 / (1 + alts × 0.05)<br>
+            0 alts → ×1.0 &nbsp;|&nbsp; 1 alt → ×0.95 &nbsp;|&nbsp; 6 alts → ×0.77 &nbsp;|&nbsp; ~8 alts → ×0.71 (soft cap ~30%)
           </div>
           <div style="margin-top:8px;color:var(--text-dim);">Counts unique items on the player's BiS list in the same slot with EPV more than 5% above their currently equipped item. Players with fewer meaningful upgrade options receive a smaller penalty — someone who is already near BiS in a slot is prioritised over someone who has many upgrades still available. If no gear listing data is available for the player, no penalty is applied. For tier tokens, the slot is determined by the player's spec-specific reward item.</div>
         </div>
@@ -5753,7 +5753,7 @@ function onItemChange() {
     altIds.delete(effectiveId);
 
     const alts = altIds.size;
-    const mult = 1 / (1 + Math.log2(alts + 1) * 0.124);
+    const mult = 1 / (1 + alts * 0.05);
     return { mult, alts };
   }
 
