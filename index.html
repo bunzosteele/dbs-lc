@@ -1034,6 +1034,7 @@
   <div class="group-btns" id="adminNav" style="justify-content:center;margin:4px auto 0;display:none;">
     <button class="group-btn" data-mode="cla" onclick="setGrouping('cla')">CLA</button>
     <button class="group-btn" data-mode="bis" onclick="setGrouping('bis')">BiS</button>
+    <button class="group-btn" data-mode="roster" onclick="setGrouping('roster')">Roster</button>
   </div>
 
   <div class="controls">
@@ -1048,6 +1049,9 @@
   </div>
 
   <textarea id="claPersist" style="display:none;"></textarea>
+
+  <div id="rosterPanel" style="display:none;padding:16px 0;">
+  </div>
 
 
   <div id="lootPanel" style="display:none;">
@@ -1299,7 +1303,15 @@ let buffScoreByPlayerDate = {}; // normalized name -> { normalizedDate -> pct }
 let latestGearIssuesByPlayer = {}; // normalized name -> { label, issues[] }
 let gearListingByPlayer = {}; // normalized name -> { Head, Neck, ... } from most recent CLA gear listing
 let claSheetDates = {}; // label -> Date object parsed from buff tab C3
-let classMap = {}; // normalized name -> class (e.g. 'Warrior')
+let classMap = {}; // normalized name -> class (e.g. 'Warrior') — populated from roster.json
+let rosterData = { players: [], excluded: [] }; // loaded from roster.json
+
+const ROLE_CLASSES = {
+  'Tanks':        ['Warrior', 'Paladin', 'Druid'],
+  'Physical DPS': ['Warrior', 'Rogue', 'Paladin', 'Shaman'],
+  'Ranged DPS':   ['Hunter', 'Mage', 'Warlock', 'Druid', 'Priest', 'Shaman'],
+  'Healers':      ['Priest', 'Paladin', 'Druid', 'Shaman'],
+};
 let glossaryData = []; // array of { raid, boss, item, eligibleClasses[] }
 let lootSortCol = 'priority';
 let lootSortDir = 'desc';
@@ -1330,16 +1342,20 @@ function setGrouping(mode) {
   const isLoot = mode === 'loot';
   const isCla  = mode === 'cla';
   const isBis  = mode === 'bis';
-  document.getElementById('lootPanel').style.display = isLoot ? 'block' : 'none';
-  document.getElementById('claPanel').style.display  = isCla  ? 'block' : 'none';
-  document.getElementById('bisPanel').style.display  = isBis  ? 'block' : 'none';
-  document.getElementById('output').style.display    = (!isLoot && !isCla && !isBis) ? 'block' : 'none';
+  const isRoster = mode === 'roster';
+  document.getElementById('lootPanel').style.display   = isLoot   ? 'block' : 'none';
+  document.getElementById('claPanel').style.display    = isCla    ? 'block' : 'none';
+  document.getElementById('bisPanel').style.display    = isBis    ? 'block' : 'none';
+  document.getElementById('rosterPanel').style.display = isRoster ? 'block' : 'none';
+  document.getElementById('output').style.display      = (!isLoot && !isCla && !isBis && !isRoster) ? 'block' : 'none';
   if (isLoot) {
     renderLootDropdowns();
   } else if (isCla) {
     renderClaList();
   } else if (isBis) {
     initBisPanel();
+  } else if (isRoster) {
+    renderRosterPanel();
   } else if (lastRenderData.roles.length) {
     render(lastRenderData);
   }
@@ -1461,28 +1477,32 @@ function parseGlossary(text) {
   return data;
 }
 
-async function fetchClasses() {
+async function loadRosterFromRepo() {
   try {
-    const text = await fetchSheet(SHEET_ID, '139934655');
-    classMap = parseClasses(text);
+    const res = await fetch('./roster.json?t=' + Date.now());
+    if (!res.ok) { console.warn('roster.json fetch failed:', res.status); return; }
+    const data = await res.json();
+    if (data && Array.isArray(data.players)) {
+      rosterData = data;
+      rebuildClassMap();
+      console.log('Loaded roster.json:', data.players.length, 'players');
+    }
   } catch(e) {
-    addError('Classes Sheet (gid: 139934655)', e.message);
+    console.warn('roster.json load error:', e.message);
+    addError('roster.json', e.message);
   }
 }
 
-function parseClasses(text) {
-  const rows = parseCsvRows(text);
-  // Row index 1 = class headers (cols 1+), rows 2+ = players
-  const headers = rows[1].slice(1).map(h => h.trim()).filter(h => h);
-  const map = {};
-  for (let r = 2; r < rows.length; r++) {
-    const row = rows[r];
-    for (let c = 0; c < headers.length; c++) {
-      const name = row[c + 1]?.trim();
-      if (name) map[normalizeName(name)] = headers[c];
-    }
+function rebuildClassMap() {
+  classMap = {};
+  for (const p of rosterData.players) {
+    if (p.name && p.class) classMap[normalizeName(p.name)] = p.class;
   }
-  return map;
+}
+
+// Legacy stub — no longer fetches from sheet
+async function fetchClasses() {
+  // Class data now comes from roster.json loaded at startup
 }
 
 // Item IDs loaded from gear-item-ids.json into gearItemIds map
@@ -2354,7 +2374,6 @@ async function fetchData() {
       fetchSheet(SHEET_ID, '2077814587').catch(e => { throw new Error(`Attendance: ${e.message}`); }),
       fetchLoot(),
       fetchPoints(),
-      fetchClasses(),
       fetchGlossary(),
       fetchAllClaData(),
     ]);
@@ -3149,7 +3168,7 @@ function clearGithubToken() {
   githubToken = '';
   try { localStorage.removeItem('ghToken'); } catch(e) {}
   // If currently in CLA mode, switch back to role view
-  if (groupingMode === 'cla' || groupingMode === 'bis') setGrouping('role');
+  if (['cla','bis','roster'].includes(groupingMode)) setGrouping('role');
   updateAuthState();
 }
 
@@ -3595,7 +3614,7 @@ async function loadGearItemIdsFromRepo() {
 }
 
 loadClaSheetsFromRepo().then(async () => {
-  await Promise.all([loadGearItemIdsFromRepo(), loadBisDataFromRepo()]);
+  await Promise.all([loadGearItemIdsFromRepo(), loadBisDataFromRepo(), loadRosterFromRepo()]);
   // Handle PKCE callback first (page may have been redirected back from WarcraftLogs)
   const wasCallback = await handleWclCallback();
   await fetchData();
@@ -3605,6 +3624,202 @@ loadClaSheetsFromRepo().then(async () => {
     fetchWclAllStars(WCL_REALM);
   }
 });
+
+
+// ── Roster Panel ─────────────────────────────────────────────────
+
+async function saveRosterToGitHub() {
+  await saveJsonToGitHub('roster.json', rosterData);
+}
+
+function getRosterClaRecommendations() {
+  // Players present in any CLA sheet but not in roster and not excluded
+  const rosterNorm = new Set(rosterData.players.map(p => normalizeName(p.name)));
+  const excludedNorm = new Set((rosterData.excluded || []).map(n => normalizeName(n)));
+  const candidates = new Set();
+  for (const key of Object.keys(claDataByPlayer)) {
+    if (!rosterNorm.has(key) && !excludedNorm.has(key)) {
+      // Find display name from CLA data
+      for (const sheet of claSheets) {
+        // scan latestGearIssuesByPlayer and buffConsumables keys
+      }
+      candidates.add(key);
+    }
+  }
+  // Also scan latestGearIssuesByPlayer for names
+  for (const key of Object.keys(latestGearIssuesByPlayer)) {
+    if (!rosterNorm.has(key) && !excludedNorm.has(key)) candidates.add(key);
+  }
+  return [...candidates];
+}
+
+function renderRosterPanel() {
+  const panel = document.getElementById('rosterPanel');
+  if (!panel) return;
+
+  const filterRole = panel._filterRole || '';
+  const filterClass = panel._filterClass || '';
+
+  const roleOrder = ['Tanks', 'Physical DPS', 'Ranged DPS', 'Healers'];
+  const allRoles = roleOrder;
+  const allClasses = ['Druid','Hunter','Mage','Paladin','Priest','Rogue','Shaman','Warlock','Warrior'];
+
+  const filtered = rosterData.players.filter(p =>
+    (!filterRole  || p.role  === filterRole) &&
+    (!filterClass || p.class === filterClass)
+  );
+
+  const recommendations = getRosterClaRecommendations();
+
+  const CLASS_COLORS = {
+    'Druid':'#ff7c0a','Hunter':'#aad372','Mage':'#3fc7eb','Paladin':'#f48cba',
+    'Priest':'#ffffff','Rogue':'#fff468','Shaman':'#0070dd','Warlock':'#8788ee','Warrior':'#c69b3a',
+  };
+
+  function classStyle(cls) {
+    const c = CLASS_COLORS[cls] || 'var(--text)';
+    return `color:${c};font-weight:600;`;
+  }
+
+  panel.innerHTML = `
+    <div style="max-width:900px;margin:0 auto;padding:0 16px;">
+
+      <!-- Header + filters -->
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+        <div style="font-family:'Cinzel',serif;font-size:16px;letter-spacing:0.15em;color:var(--gold);">ROSTER</div>
+        <select id="rosterFilterRole" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px;" onchange="rosterApplyFilter()">
+          <option value="">All Roles</option>
+          ${allRoles.map(r => `<option value="${r}" ${filterRole===r?'selected':''}>${r}</option>`).join('')}
+        </select>
+        <select id="rosterFilterClass" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px;" onchange="rosterApplyFilter()">
+          <option value="">All Classes</option>
+          ${allClasses.map(c => `<option value="${c}" ${filterClass===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+        <span style="color:var(--text-dim);font-size:13px;margin-left:auto;">${filtered.length} of ${rosterData.players.length} raiders</span>
+      </div>
+
+      <!-- Roster table -->
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);">
+            <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">PLAYER</th>
+            <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">ROLE</th>
+            <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">CLASS</th>
+            <th style="padding:6px 12px;"></th>
+          </tr>
+        </thead>
+        <tbody>
+          ${filtered.map((p, i) => `
+            <tr style="border-bottom:1px solid var(--border)20;">
+              <td style="padding:7px 12px;color:${CLASS_COLORS[p.class]||'var(--text)'};font-weight:600;">${p.name}</td>
+              <td style="padding:7px 12px;color:var(--text-dim);font-size:13px;">${ROLE_ICONS[p.role]||''} ${p.role}</td>
+              <td style="padding:7px 12px;font-size:13px;${classStyle(p.class)}">${p.class}</td>
+              <td style="padding:7px 12px;text-align:right;">
+                <button onclick="rosterRemovePlayer('${p.name}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;padding:2px 6px;" title="Remove from roster">✕</button>
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+
+      <!-- Add new player -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:24px;">
+        <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:12px;">ADD RAIDER</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <label style="font-size:11px;color:var(--text-dim);">Name</label>
+            <input id="rosterAddName" placeholder="Player name" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;width:160px;">
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <label style="font-size:11px;color:var(--text-dim);">Role</label>
+            <select id="rosterAddRole" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;" onchange="rosterUpdateClassOptions()">
+              <option value="">— Role —</option>
+              ${allRoles.map(r => `<option value="${r}">${r}</option>`).join('')}
+            </select>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <label style="font-size:11px;color:var(--text-dim);">Class</label>
+            <select id="rosterAddClass" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;" disabled>
+              <option value="">— Select role first —</option>
+            </select>
+          </div>
+          <button onclick="rosterAddPlayer()" style="background:var(--gold-dim);border:none;color:var(--bg);padding:7px 16px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.1em;">ADD</button>
+        </div>
+      </div>
+
+      ${recommendations.length ? `
+      <!-- Recommendations from CLA -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;">
+        <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:4px;">SEEN IN CLA — NOT ON ROSTER</div>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">These players appear in CLA exports but are not on the roster. Click ✕ to permanently exclude them.</div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;">
+          ${recommendations.map(key => `
+            <div style="display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 10px;">
+              <span style="font-size:13px;color:var(--text);">${key}</span>
+              <button onclick="rosterExcludePlayer('${key}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:12px;padding:0 2px;" title="Exclude permanently">✕</button>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}
+
+    </div>
+  `;
+}
+
+function rosterApplyFilter() {
+  const panel = document.getElementById('rosterPanel');
+  panel._filterRole  = document.getElementById('rosterFilterRole')?.value  || '';
+  panel._filterClass = document.getElementById('rosterFilterClass')?.value || '';
+  renderRosterPanel();
+}
+
+function rosterUpdateClassOptions() {
+  const role = document.getElementById('rosterAddRole')?.value;
+  const classSel = document.getElementById('rosterAddClass');
+  if (!classSel) return;
+  const classes = ROLE_CLASSES[role] || [];
+  if (!classes.length) {
+    classSel.innerHTML = '<option value="">— Select role first —</option>';
+    classSel.disabled = true;
+  } else {
+    classSel.innerHTML = '<option value="">— Class —</option>' +
+      classes.map(c => `<option value="${c}">${c}</option>`).join('');
+    classSel.disabled = false;
+  }
+}
+
+function rosterAddPlayer() {
+  const name  = document.getElementById('rosterAddName')?.value?.trim();
+  const role  = document.getElementById('rosterAddRole')?.value;
+  const cls   = document.getElementById('rosterAddClass')?.value;
+  if (!name || !role || !cls) {
+    alert('Please fill in all fields.');
+    return;
+  }
+  if (rosterData.players.some(p => normalizeName(p.name) === normalizeName(name))) {
+    alert(`${name} is already on the roster.`);
+    return;
+  }
+  // Remove from excluded if present
+  rosterData.excluded = (rosterData.excluded || []).filter(n => normalizeName(n) !== normalizeName(name));
+  rosterData.players.push({ name, role, class: cls });
+  rebuildClassMap();
+  saveRosterToGitHub();
+  renderRosterPanel();
+}
+
+function rosterRemovePlayer(name) {
+  if (!confirm(`Remove ${name} from the roster?`)) return;
+  rosterData.players = rosterData.players.filter(p => p.name !== name);
+  rebuildClassMap();
+  saveRosterToGitHub();
+  renderRosterPanel();
+}
+
+function rosterExcludePlayer(key) {
+  if (!rosterData.excluded) rosterData.excluded = [];
+  if (!rosterData.excluded.includes(key)) rosterData.excluded.push(key);
+  saveRosterToGitHub();
+  renderRosterPanel();
+}
 
 // ── BiS Browser ─────────────────────────────────────────────────
 
