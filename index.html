@@ -897,10 +897,13 @@
   details summary span:first-child { display:inline-block; transition: transform 0.15s; }
   details summary::-webkit-details-marker { display: none; }
 
-  /* Hide number input spinners on BiS EPV fields */
+  /* Hide number input spinners */
   #bisContent input[type=number]::-webkit-outer-spin-button,
-  #bisContent input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-  #bisContent input[type=number] { -moz-appearance: textfield; }
+  #bisContent input[type=number]::-webkit-inner-spin-button,
+  #glValueInput::-webkit-outer-spin-button,
+  #glValueInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  #bisContent input[type=number],
+  #glValueInput { -moz-appearance: textfield; }
 
   /* ── Mobile Responsive ────────────────────────────── */
   @media (max-width: 768px) {
@@ -3759,14 +3762,39 @@ function renderGlossaryPanel() {
         <label class="loot-select-label">Boss</label>
         ${sel('glBoss', [{v:'',l:'— Select Boss —'}, ...bosses], boss, 'glossarySelectBoss()', !raid?'disabled':'')}
       </div>
-      <div class="loot-select-group">
+      <div class="loot-select-group" style="position:relative;">
         <label class="loot-select-label">Item</label>
-        ${sel('glItem', [{v:'',l:'— Select Item —'}, ...items], item, 'glossarySelectItem()', !(raid&&boss)?'disabled':'')}
+        <div id="glItemDisplay" class="loot-select loot-item-display" onclick="toggleGlossaryItemDropdown()"
+          style="display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none;${!(raid&&boss)?'opacity:0.4;pointer-events:none;':''}"
+        >
+          ${item && itemIcons[getItemId(item)]
+            ? `<img src="https://wow.zamimg.com/images/wow/icons/small/${itemIcons[getItemId(item)]}.jpg" style="width:18px;height:18px;border:1px solid #444;border-radius:2px;flex-shrink:0;" />`
+            : ''}
+          <span id="glItemText">${item || '— Select Item —'}</span>
+        </div>
+        <div id="glItemDropdown" class="loot-item-dropdown" style="display:none;">
+          ${items.map(i => {
+            const iid = getItemId(i);
+            const ico = iid && itemIcons[iid] ? `<img src="https://wow.zamimg.com/images/wow/icons/small/${itemIcons[iid]}.jpg" />` : '';
+            return `<div class="loot-item-option ${i===item?'selected':''}" onclick="glossarySelectItemCustom('${i.replace(/'/g,"\'")}')">
+              ${ico}<span>${i}</span>
+            </div>`;
+          }).join('')}
+        </div>
       </div>
     </div>
     <div style="padding:0 0 16px;">
 
       ${entry ? `
+      <!-- Item header with icon -->
+      ${(() => {
+        const _eid = getItemId(entry.item);
+        const _eico = _eid && itemIcons[_eid];
+        return _eid ? `<div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;">
+          ${_eico ? `<a href="https://www.wowhead.com/tbc/item=${_eid}" data-wowhead="item=${_eid}&dataset=tbc" target="_blank" rel="noopener" style="flex-shrink:0;"><img src="https://wow.zamimg.com/images/wow/icons/large/${_eico}.jpg" style="width:40px;height:40px;border:2px solid var(--gold-dim);border-radius:4px;display:block;" /></a>` : ''}
+          <a href="https://www.wowhead.com/tbc/item=${_eid}" data-wowhead="item=${_eid}&dataset=tbc" target="_blank" rel="noopener" style="font-family:'Cinzel',serif;font-size:18px;color:var(--gold);text-decoration:none;">${entry.item}</a>
+        </div>` : '';
+      })()}
       <!-- Item detail -->
       <div style="display:flex;flex-direction:column;gap:16px;">
 
@@ -3849,7 +3877,9 @@ function renderGlossaryPanel() {
                 ${c}</button>`;
             }).join('')}
           </div>
-          <button onclick="glossarySaveClasses()" style="background:var(--gold-dim);border:none;color:var(--bg);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;">SAVE</button>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px;">
+            <button onclick="glossarySaveClasses()" style="background:var(--gold-dim);border:none;color:var(--bg);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;">SAVE</button>
+          </div>
         </div>
 
       </div>
@@ -3857,6 +3887,7 @@ function renderGlossaryPanel() {
     </div>
     </div>
   `;
+  setTimeout(() => { if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks(); }, 100);
 }
 
 function glossarySelectRaid() {
@@ -3871,8 +3902,21 @@ function glossarySelectBoss() {
   renderGlossaryPanel();
 }
 function glossarySelectItem() {
-  _glossaryState.item = document.getElementById('glItem').value;
+  _glossaryState.item = document.getElementById('glItem')?.value || '';
   renderGlossaryPanel();
+}
+function toggleGlossaryItemDropdown() {
+  const dd = document.getElementById('glItemDropdown');
+  if (dd) dd.style.display = dd.style.display === 'none' ? 'block' : 'none';
+}
+function glossarySelectItemCustom(itemName) {
+  _glossaryState.item = itemName;
+  const dd = document.getElementById('glItemDropdown');
+  if (dd) dd.style.display = 'none';
+  renderGlossaryPanel();
+  if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) {
+    setTimeout(() => $WowheadPower.refreshLinks(), 100);
+  }
 }
 
 function _currentGlossaryEntry() {
