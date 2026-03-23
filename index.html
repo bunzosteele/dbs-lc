@@ -5731,13 +5731,22 @@ function onItemChange() {
       if (epv && epv > currentEpv) currentEpv = epv;
     }
 
+    // Find the earliest phase the candidate item appears on any of this player's BiS lists
+    let earliestPhase = Infinity;
+    for (const spec of specs) {
+      for (const e of (bisData[spec]?.[itemSlot] || [])) {
+        if (e[0] === effectiveId && e[2] < earliestPhase) earliestPhase = e[2];
+      }
+    }
+    if (earliestPhase === Infinity) earliestPhase = 1;
+
     // Count items on this player's BiS list in this slot with EPV > current * 1.05
-    // (i.e. how many meaningful upgrades exist for this player in this slot)
+    // Only consider items present in the same phase as the earliest appearance of the candidate
     const threshold = currentEpv * 1.05;
     const altIds = new Set();
     for (const spec of specs) {
       for (const e of (bisData[spec]?.[itemSlot] || [])) {
-        if (e[3]/100 > threshold) altIds.add(e[0]);
+        if (e[2] === earliestPhase && e[3]/100 > threshold) altIds.add(e[0]);
       }
     }
     // Exclude the candidate itself — we're counting other options
