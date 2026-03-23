@@ -1,0 +1,189 @@
+{
+  "players": [
+    {
+      "name": "Aberfourth",
+      "role": "Tanks",
+      "class": "Paladin"
+    },
+    {
+      "name": "Bunzypoo",
+      "role": "Tanks",
+      "class": "Paladin"
+    },
+    {
+      "name": "Scarlypoo",
+      "role": "Tanks",
+      "class": "Warrior"
+    },
+    {
+      "name": "Scottypoo",
+      "role": "Tanks",
+      "class": "Druid"
+    },
+    {
+      "name": "Aragorrn",
+      "role": "Physical DPS",
+      "class": "Warrior"
+    },
+    {
+      "name": "Ceren",
+      "role": "Physical DPS",
+      "class": "Shaman"
+    },
+    {
+      "name": "Cythrawl",
+      "role": "Physical DPS",
+      "class": "Rogue"
+    },
+    {
+      "name": "Foxwillcry",
+      "role": "Physical DPS",
+      "class": "Rogue"
+    },
+    {
+      "name": "Karlz",
+      "role": "Physical DPS",
+      "class": "Warrior"
+    },
+    {
+      "name": "Kyliemirogue",
+      "role": "Physical DPS",
+      "class": "Rogue"
+    },
+    {
+      "name": "K\u00e6lstorm",
+      "role": "Physical DPS",
+      "class": "Shaman"
+    },
+    {
+      "name": "Shuuko",
+      "role": "Physical DPS",
+      "class": "Rogue"
+    },
+    {
+      "name": "Arcturrax",
+      "role": "Ranged DPS",
+      "class": "Hunter"
+    },
+    {
+      "name": "Fizzl\u00e9",
+      "role": "Ranged DPS",
+      "class": "Mage"
+    },
+    {
+      "name": "Hinya",
+      "role": "Ranged DPS",
+      "class": "Hunter"
+    },
+    {
+      "name": "Izola",
+      "role": "Ranged DPS",
+      "class": "Warlock"
+    },
+    {
+      "name": "Jonnydepp",
+      "role": "Ranged DPS",
+      "class": "Warlock"
+    },
+    {
+      "name": "Koorva",
+      "role": "Ranged DPS",
+      "class": "Mage"
+    },
+    {
+      "name": "Lullzz",
+      "role": "Ranged DPS",
+      "class": "Mage"
+    },
+    {
+      "name": "Manedic",
+      "role": "Ranged DPS",
+      "class": "Warlock"
+    },
+    {
+      "name": "Mayous",
+      "role": "Ranged DPS",
+      "class": "Hunter"
+    },
+    {
+      "name": "Numuhukumaky",
+      "role": "Ranged DPS",
+      "class": "Warlock"
+    },
+    {
+      "name": "Riins",
+      "role": "Ranged DPS",
+      "class": "Hunter"
+    },
+    {
+      "name": "Semithistle",
+      "role": "Ranged DPS",
+      "class": "Hunter"
+    },
+    {
+      "name": "Shad\u00f6whe\u00e2rt",
+      "role": "Ranged DPS",
+      "class": "Warlock"
+    },
+    {
+      "name": "Snuggletotems",
+      "role": "Ranged DPS",
+      "class": "Shaman"
+    },
+    {
+      "name": "Tilton",
+      "role": "Ranged DPS",
+      "class": "Warlock"
+    },
+    {
+      "name": "Zaene",
+      "role": "Ranged DPS",
+      "class": "Warlock"
+    },
+    {
+      "name": "Bartpleb",
+      "role": "Healers",
+      "class": "Priest"
+    },
+    {
+      "name": "Dixianna",
+      "role": "Healers",
+      "class": "Paladin"
+    },
+    {
+      "name": "Drekhar",
+      "role": "Healers",
+      "class": "Shaman"
+    },
+    {
+      "name": "D\u00eamz",
+      "role": "Healers",
+      "class": "Shaman"
+    },
+    {
+      "name": "Missenji",
+      "role": "Healers",
+      "class": "Shaman"
+    },
+    {
+      "name": "Mythlight",
+      "role": "Healers",
+      "class": "Paladin"
+    },
+    {
+      "name": "Padreanton",
+      "role": "Healers",
+      "class": "Priest"
+    },
+    {
+      "name": "Sycamoore",
+      "role": "Healers",
+      "class": "Druid"
+    }
+  ],
+  "excluded": [
+    "Forrestpump",
+    "Qualify",
+    "Manepoo"
+  ]
+}
