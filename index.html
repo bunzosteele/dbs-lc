@@ -3137,6 +3137,115 @@ function render({ dates, roles }) {
   setTimeout(() => { if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks(); }, 200);
 }
 
+
+// ── Tier Progress ─────────────────────────────────────────────────
+
+function buildTierProgressHtml(playerName) {
+  // Determine which tier sets are relevant for this player's specs
+  const specs = getPlayerBisSpecs(playerName);
+  if (!specs.length) return '';
+
+  // Find which sets the player's specs can receive tokens for
+  // A spec is eligible for a set if any token of that set rewards that spec
+  const eligibleSets = new Set(); // 'T4|Defender' etc
+  for (const [tokenIdStr, rewards] of Object.entries(TOKEN_REWARDS)) {
+    const tokenId = parseInt(tokenIdStr);
+    const meta = TOKEN_TIER_META[tokenId];
+    if (!meta) continue;
+    if (specs.some(s => rewards[s] !== undefined)) {
+      eligibleSets.add(`${meta.tier}|${meta.set}`);
+    }
+  }
+  if (!eligibleSets.size) return '';
+
+  // For each eligible set, count owned pieces and which slots
+  const key = normalizeName(playerName);
+  const loot = lootByPlayer[key] || [];
+  const gearSlots = gearListingByPlayer[key]?.slots || {};
+
+  // Build owned slots per tier+set
+  const owned = {}; // 'T4|Defender' -> Set of slots
+  // From loot history (tokens)
+  for (const entry of loot) {
+    const itemName = typeof entry === 'object' ? entry.name : entry;
+    const itemId = getItemId(itemName, playerName);
+    if (!itemId) continue;
+    const meta = TOKEN_TIER_META[itemId];
+    if (!meta) continue;
+    const setKey = `${meta.tier}|${meta.set}`;
+    if (!owned[setKey]) owned[setKey] = new Set();
+    owned[setKey].add(meta.slot);
+  }
+  // From CLA gear listing (equipped reward items)
+  for (const itemName of Object.values(gearSlots)) {
+    if (!itemName) continue;
+    const itemId = getItemId(itemName, playerName);
+    if (!itemId) continue;
+    const meta = REWARD_TIER_META[itemId];
+    if (!meta) continue;
+    const setKey = `${meta.tier}|${meta.set}`;
+    if (!owned[setKey]) owned[setKey] = new Set();
+    owned[setKey].add(meta.slot);
+  }
+
+  // Only show sets where player has at least 1 piece, OR is eligible and has 0
+  // Filter to eligible sets only
+  const relevantSets = [...eligibleSets].filter(sk => owned[sk]?.size > 0);
+  if (!relevantSets.length) return '';
+
+  // Sort by tier then set name
+  relevantSets.sort();
+
+  // Define all possible slots per tier for progress display
+  const TIER_SLOTS = {
+    T4: ['Shoulders','Chest','Legs'],
+    T5: ['Shoulders','Chest','Legs','Hands','Head'],
+    T6: ['Shoulders','Chest','Legs','Hands','Head','Bracers','Waist','Feet'],
+  };
+
+  const TIER_COLORS = { T4: '#a335ee', T5: '#0070dd', T6: '#ff8000' };
+
+  let html = `<div class="expand-section-title" style="margin-top:10px;">Tier Progress</div>`;
+  html += `<div style="display:flex;flex-wrap:wrap;gap:12px;padding:4px 0 6px;">`;
+
+  for (const setKey of relevantSets) {
+    const [tier, set] = setKey.split('|');
+    const slots = TIER_SLOTS[tier] || [];
+    const ownedSlots = owned[setKey] || new Set();
+    const count = ownedSlots.size;
+    const total = slots.length;
+    const color = TIER_COLORS[tier] || 'var(--gold)';
+
+    // Determine bonus status
+    const has2pc = count >= 2;
+    const has4pc = count >= 4;
+    const next = count < total ? (count === 1 ? '→ 2pc' : count === 3 ? '→ 4pc' : '') : '';
+
+    html += `<div style="display:flex;flex-direction:column;gap:4px;min-width:120px;">`;
+    html += `<div style="font-size:11px;letter-spacing:0.1em;color:${color};font-family:'Cinzel',serif;">${tier} ${set}</div>`;
+
+    // Slot pips
+    html += `<div style="display:flex;gap:3px;flex-wrap:wrap;">`;
+    for (const slot of slots) {
+      const hasPiece = ownedSlots.has(slot);
+      html += `<span title="${slot}" style="width:14px;height:14px;border-radius:2px;border:1px solid ${hasPiece ? color : 'var(--border)'};background:${hasPiece ? color + '55' : 'transparent'};display:inline-block;"></span>`;
+    }
+    html += `</div>`;
+
+    // Count + bonus indicators
+    html += `<div style="font-size:12px;color:var(--text-dim);">${count}/${total}`;
+    if (has4pc) html += ` <span style="color:${color};font-weight:600;">4pc ✓</span>`;
+    else if (has2pc) html += ` <span style="color:${color};font-weight:600;">2pc ✓</span>`;
+    if (next) html += ` <span style="color:var(--gold-dim);font-size:11px;">${next}</span>`;
+    html += `</div>`;
+
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
 function toggleLoot(td, playerName) {
   const tr = td.closest('tr');
   const arrow = td.querySelector('.loot-arrow');
@@ -3186,6 +3295,9 @@ function toggleLoot(td, playerName) {
       return `<span class="loot-item" style="border-color:${col};background:${col}18;"${epvTip}>${itemLink(name, name)}</span>`;
     }).join('')}</div>`;
   }
+
+  // Tier set progress section
+  html += buildTierProgressHtml(playerName);
 
   html += `</td>`;
   lootTr.innerHTML = html;
