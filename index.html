@@ -1045,6 +1045,7 @@
     <button class="group-btn" data-mode="bis" onclick="setGrouping('bis')">BiS</button>
     <button class="group-btn" data-mode="roster" onclick="setGrouping('roster')">Roster</button>
     <button class="group-btn" data-mode="glossary" onclick="setGrouping('glossary')">Loot Glossary</button>
+    <button class="group-btn" data-mode="attendance" onclick="setGrouping('attendance')">Attendance</button>
   </div>
 
   <div class="controls">
@@ -1064,6 +1065,9 @@
   </div>
 
   <div id="glossaryPanel" style="display:none;padding:16px 0;">
+  </div>
+
+  <div id="attendancePanel" style="display:none;padding:16px 0;">
   </div>
 
   <div id="lootPanel" style="display:none;">
@@ -1328,6 +1332,7 @@ let gearListingByPlayer = {}; // normalized name -> { Head, Neck, ... } from mos
 let claSheetDates = {}; // label -> Date object parsed from buff tab C3
 let classMap = {}; // normalized name -> class (e.g. 'Warrior') — populated from roster.json
 let rosterData = { players: [], excluded: [] }; // loaded from roster.json
+let attendanceData = { raids: [], overrides: {} }; // loaded from attendance.json
 
 const ROLE_CLASSES = {
   'Tanks':        ['Warrior', 'Paladin', 'Druid'],
@@ -1367,12 +1372,14 @@ function setGrouping(mode) {
   const isBis  = mode === 'bis';
   const isRoster  = mode === 'roster';
   const isGlossary = mode === 'glossary';
+  const isAttendance = mode === 'attendance';
   document.getElementById('lootPanel').style.display   = isLoot   ? 'block' : 'none';
   document.getElementById('claPanel').style.display    = isCla    ? 'block' : 'none';
   document.getElementById('bisPanel').style.display    = isBis    ? 'block' : 'none';
   document.getElementById('rosterPanel').style.display   = isRoster   ? 'block' : 'none';
-  document.getElementById('glossaryPanel').style.display = isGlossary ? 'block' : 'none';
-  document.getElementById('output').style.display      = (!isLoot && !isCla && !isBis && !isRoster && !isGlossary) ? 'block' : 'none';
+  document.getElementById('glossaryPanel').style.display   = isGlossary   ? 'block' : 'none';
+  document.getElementById('attendancePanel').style.display = isAttendance ? 'block' : 'none';
+  document.getElementById('output').style.display      = (!isLoot && !isCla && !isBis && !isRoster && !isGlossary && !isAttendance) ? 'block' : 'none';
   if (isLoot) {
     // Sync glossary selection → loot tab
     if (_glossaryState.item && _glossaryState.raid && _glossaryState.boss) {
@@ -1581,6 +1588,168 @@ async function loadSetBonusesFromRepo() {
 
 async function saveSetBonusesToGitHub() {
   await saveJsonToGitHub('set-bonuses.json', setBonusData);
+}
+
+
+// ── Attendance Data ───────────────────────────────────────────────
+
+async function loadAttendanceFromRepo() {
+  try {
+    const res = await fetch('./attendance.json?t=' + Date.now());
+    if (!res.ok) { console.warn('attendance.json fetch failed:', res.status); return; }
+    const data = await res.json();
+    if (data && Array.isArray(data.raids)) {
+      attendanceData = data;
+      console.log('Loaded attendance.json:', data.raids.length, 'raids');
+    }
+  } catch(e) {
+    console.warn('attendance.json load error:', e.message);
+  }
+}
+
+async function saveAttendanceToGitHub() {
+  await saveJsonToGitHub('attendance.json', attendanceData);
+}
+
+// Build attendance data from CLA sheets — called after fetchAllClaData()
+// For each CLA sheet, reads the date from claSheetDates and checks which
+// roster players appear in that sheet's gear issues or gear listing data
+function rebuildAttendanceFromCla() {
+  // Collect all known raid dates from CLA sheets
+  const claRaidDates = {}; // label -> Date
+  for (const [label, date] of Object.entries(claSheetDates)) {
+    claRaidDates[label] = date;
+  }
+  if (!Object.keys(claRaidDates).length) return;
+
+  // Sort dates chronologically
+  const sortedLabels = Object.keys(claRaidDates).sort(
+    (a, b) => claRaidDates[a] - claRaidDates[b]
+  );
+
+  // Ensure each date exists in attendanceData.raids
+  let changed = false;
+  for (const label of sortedLabels) {
+    const date = claRaidDates[label];
+    const dateStr = formatAttendanceDate(date);
+    if (!attendanceData.raids.find(r => r.date === dateStr)) {
+      attendanceData.raids.push({ date: dateStr, label: formatRaidLabel(date) });
+      changed = true;
+    }
+  }
+  // Keep raids sorted chronologically
+  attendanceData.raids.sort((a, b) => a.date.localeCompare(b.date));
+
+  // Build CLA-derived presence: player -> set of dates attended
+  // A player is present if their name appears in claDataByPlayer for that label
+  const claPresence = {}; // playerKey -> Set of dateStr
+  for (const [playerKey, data] of Object.entries(claDataByPlayer)) {
+    const dates = new Set();
+    for (const gi of (data.gearIssues || [])) {
+      const claDate = claRaidDates[gi.label];
+      if (claDate) dates.add(formatAttendanceDate(claDate));
+    }
+    if (dates.size) claPresence[playerKey] = dates;
+  }
+  // Also check buffScoreByPlayerDate
+  for (const [playerKey, dateMap] of Object.entries(buffScoreByPlayerDate || {})) {
+    for (const dateLabel of Object.keys(dateMap)) {
+      // dateLabel is the normalised CLA label — find corresponding date
+      for (const [label, date] of Object.entries(claRaidDates)) {
+        if (normalizeDate(label) === dateLabel || label === dateLabel) {
+          if (!claPresence[playerKey]) claPresence[playerKey] = new Set();
+          claPresence[playerKey].add(formatAttendanceDate(date));
+        }
+      }
+    }
+  }
+  // Also check gearListingByPlayer
+  for (const [playerKey, gearData] of Object.entries(gearListingByPlayer)) {
+    const label = gearData.label;
+    const date = claRaidDates[label];
+    if (date) {
+      if (!claPresence[playerKey]) claPresence[playerKey] = new Set();
+      claPresence[playerKey].add(formatAttendanceDate(date));
+    }
+  }
+
+  // Store CLA-derived presence separately so UI can show it vs overrides
+  window._claPresence = claPresence;
+}
+
+// Returns true/false for a player on a raid date, applying overrides over CLA data
+function getPlayerAttendance(playerName, dateStr) {
+  const key = normalizeName(playerName);
+  // Check override first
+  if (attendanceData.overrides[key]?.[dateStr] !== undefined) {
+    return attendanceData.overrides[key][dateStr];
+  }
+  // Fall back to CLA-derived presence
+  return window._claPresence?.[key]?.has(dateStr) ?? false;
+}
+
+function setPlayerAttendanceOverride(playerName, dateStr, value) {
+  const key = normalizeName(playerName);
+  if (!attendanceData.overrides[key]) attendanceData.overrides[key] = {};
+  const claValue = window._claPresence?.[key]?.has(dateStr) ?? false;
+  if (value === claValue) {
+    // Removing override — matches CLA data
+    delete attendanceData.overrides[key][dateStr];
+    if (!Object.keys(attendanceData.overrides[key]).length) {
+      delete attendanceData.overrides[key];
+    }
+  } else {
+    attendanceData.overrides[key][dateStr] = value;
+  }
+}
+
+function formatAttendanceDate(date) {
+  // ISO date string YYYY-MM-DD
+  return date.toISOString().slice(0, 10);
+}
+
+function formatRaidLabel(date) {
+  // "Mar 19" style
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+// Build the { dates, roles } structure that the rest of the dashboard uses,
+// from attendanceData + rosterData — replaces parseCSV output
+function buildAttendanceRenderData() {
+  const raids = attendanceData.raids;
+  if (!raids.length || !rosterData.players.length) return null;
+
+  const dates = raids.map(r => r.label);
+  const n = raids.length;
+
+  const ROLE_ORDER = ['Tanks', 'Physical DPS', 'Ranged DPS', 'Healers'];
+  const roleMap = {};
+  for (const p of rosterData.players) {
+    if (!p.role || rosterData.excluded?.includes(p.name)) continue;
+    if (!roleMap[p.role]) roleMap[p.role] = [];
+    roleMap[p.role].push(p);
+  }
+
+  const roles = ROLE_ORDER.filter(r => roleMap[r]).map(roleName => {
+    const players = roleMap[roleName].map(p => {
+      const flags = raids.map(r => getPlayerAttendance(p.name, r.date));
+      const trueIdx = flags.map((b, i) => b ? i : -1).filter(i => i >= 0);
+      if (!trueIdx.length) {
+        return { name: p.name, attended: 0, window: 0, pct: null, flags, n, inactive: false };
+      }
+      const first = trueIdx[0], last = trueIdx[trueIdx.length - 1];
+      const raidsSinceLast = (n - 1) - last;
+      const inactive = raidsSinceLast > 2;
+      const windowEnd = inactive ? last : (n - 1);
+      const window = windowEnd - first + 1;
+      const attended = flags.slice(first, windowEnd + 1).filter(Boolean).length;
+      const pct = (attended / window) * 100;
+      return { name: p.name, attended, window, pct, flags, n, first, last, inactive };
+    });
+    return { name: roleName, players };
+  });
+
+  return { dates, roles };
 }
 
 async function loadRosterFromRepo() {
@@ -2448,21 +2617,27 @@ async function fetchData() {
     fetchItemMap(); // instant — populates from static map
 
     // Fire all fetches in parallel
-    const [attendanceText, lootText] = await Promise.all([
-      fetchSheet(SHEET_ID, '2077814587').catch(e => { throw new Error(`Attendance: ${e.message}`); }),
-      fetchSheet(SHEET_ID, '964257878').catch(e => { addError('Loot Sheet (gid: 964257878)', e.message); return ''; }),
+    const [, lootText] = await Promise.all([
       fetchAllClaData(),
+      fetchSheet(SHEET_ID, '964257878').catch(e => { addError('Loot Sheet (gid: 964257878)', e.message); return ''; }),
     ]);
     if (lootText) lootByPlayer = parseLoot(lootText);
 
-    let data;
-    try {
-      data = parseCSV(attendanceText);
-      if (!data.dates.length) throw new Error('No raid dates found in header row — check sheet format');
-      if (!data.roles.length) throw new Error('No role groups found — check sheet format');
-    } catch(parseErr) {
-      addError('Attendance Sheet', parseErr.message);
-      throw parseErr;
+    // Build attendance from CLA data
+    rebuildAttendanceFromCla();
+    if (groupingMode === 'attendance') renderAttendancePanel();
+
+    let data = buildAttendanceRenderData();
+    if (!data || !data.dates.length || !data.roles.length) {
+      // Fallback: try legacy attendance sheet
+      try {
+        const attendanceText = await fetchSheet(SHEET_ID, '2077814587');
+        data = parseCSV(attendanceText);
+        if (!data.dates.length) throw new Error('No raid dates found');
+      } catch(e) {
+        addError('Attendance', 'No CLA dates found and legacy sheet failed: ' + e.message);
+        throw e;
+      }
     }
 
     if (fetchErrors.length) {
@@ -3361,7 +3536,7 @@ function clearGithubToken() {
   githubToken = '';
   try { localStorage.removeItem('ghToken'); } catch(e) {}
   // If currently in CLA mode, switch back to role view
-  if (['cla','bis','roster','glossary'].includes(groupingMode)) setGrouping('role');
+  if (['cla','bis','roster','glossary','attendance'].includes(groupingMode)) setGrouping('role');
   updateAuthState();
 }
 
@@ -3807,7 +3982,7 @@ async function loadGearItemIdsFromRepo() {
 }
 
 loadClaSheetsFromRepo().then(async () => {
-  await Promise.all([loadGearItemIdsFromRepo(), loadBisDataFromRepo(), loadRosterFromRepo(), loadLootGlossaryFromRepo(), loadSetBonusesFromRepo()]);
+  await Promise.all([loadGearItemIdsFromRepo(), loadBisDataFromRepo(), loadRosterFromRepo(), loadLootGlossaryFromRepo(), loadSetBonusesFromRepo(), loadAttendanceFromRepo()]);
   // Handle PKCE callback first (page may have been redirected back from WarcraftLogs)
   const wasCallback = await handleWclCallback();
   await fetchData();
@@ -3926,6 +4101,166 @@ function setBonusRemove(threshold, idx) {
   cfg[threshold].splice(idx, 1);
   saveSetBonusesToGitHub();
   renderGlossaryPanel();
+}
+
+
+// ── Attendance Panel ──────────────────────────────────────────────
+
+let _attendanceFilter = { role: '', cls: '' };
+let _attendancePendingSaves = new Set();
+let _attendanceSaveTimer = null;
+
+function renderAttendancePanel() {
+  const panel = document.getElementById('attendancePanel');
+  if (!panel) return;
+
+  const raids = attendanceData.raids;
+  const players = rosterData.players.filter(p => !rosterData.excluded?.includes(p.name));
+
+  const ROLE_ORDER = ['Tanks', 'Physical DPS', 'Ranged DPS', 'Healers'];
+  const CLASSES = ['Druid','Hunter','Mage','Paladin','Priest','Rogue','Shaman','Warlock','Warrior'];
+
+  // Filter options
+  const filteredPlayers = players.filter(p => {
+    if (_attendanceFilter.role && p.role !== _attendanceFilter.role) return false;
+    if (_attendanceFilter.cls && p.class !== _attendanceFilter.cls) return false;
+    return true;
+  });
+
+  // Sort: role order first, then class, then name
+  filteredPlayers.sort((a, b) => {
+    const ri = ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role);
+    if (ri !== 0) return ri;
+    const ci = (a.class || '').localeCompare(b.class || '');
+    if (ci !== 0) return ci;
+    return a.name.localeCompare(b.name);
+  });
+
+  const selStyle = 'background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;';
+
+  panel.innerHTML = `
+    <div style="max-width:100%;overflow-x:auto;">
+      <!-- Filters -->
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:16px;flex-wrap:wrap;">
+        <select style="${selStyle}" onchange="attendanceFilterRole(this.value)">
+          <option value="">All Roles</option>
+          ${ROLE_ORDER.map(r => `<option value="${r}" ${_attendanceFilter.role===r?'selected':''}>${r}</option>`).join('')}
+        </select>
+        <select style="${selStyle}" onchange="attendanceFilterClass(this.value)">
+          <option value="">All Classes</option>
+          ${CLASSES.map(c => `<option value="${c}" ${_attendanceFilter.cls===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+        <span style="font-size:12px;color:var(--text-dim);margin-left:auto;">${filteredPlayers.length} players · ${raids.length} raids</span>
+      </div>
+
+      <!-- Table -->
+      <div style="overflow-x:auto;">
+        <table style="border-collapse:collapse;min-width:100%;">
+          <thead>
+            <tr style="border-bottom:2px solid var(--border);">
+              <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);white-space:nowrap;position:sticky;left:0;background:var(--bg);z-index:2;min-width:140px;">PLAYER</th>
+              <th style="text-align:left;padding:6px 8px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);white-space:nowrap;">ROLE</th>
+              ${raids.map(r => `
+                <th style="text-align:center;padding:6px 4px;font-family:'Cinzel',serif;font-size:10px;color:var(--text-dim);white-space:nowrap;min-width:52px;">
+                  <div>${r.label}</div>
+                  <div id="att-count-${r.date}" style="color:var(--gold-dim);font-size:11px;"></div>
+                </th>`).join('')}
+            </tr>
+          </thead>
+          <tbody id="attendanceTableBody">
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  // Build rows imperatively to avoid escaping issues with player names
+  const tbody = document.getElementById('attendanceTableBody');
+  if (!tbody) return;
+
+  let lastRole = null;
+  for (const p of filteredPlayers) {
+    // Role separator row
+    if (p.role !== lastRole) {
+      lastRole = p.role;
+      const sepRow = document.createElement('tr');
+      sepRow.innerHTML = `<td colspan="${2 + raids.length}" style="padding:6px 12px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.2em;color:var(--gold-dim);background:var(--bg2);border-top:1px solid var(--border);">${p.role.toUpperCase()}</td>`;
+      tbody.appendChild(sepRow);
+    }
+
+    const tr = document.createElement('tr');
+    tr.style.borderBottom = '1px solid rgba(255,255,255,0.04)';
+
+    // Name cell
+    const nameTd = document.createElement('td');
+    nameTd.style.cssText = 'padding:5px 12px;white-space:nowrap;position:sticky;left:0;background:var(--bg);z-index:1;';
+    nameTd.textContent = p.name;
+    tr.appendChild(nameTd);
+
+    // Role/Class cell
+    const roleTd = document.createElement('td');
+    roleTd.style.cssText = 'padding:5px 8px;font-size:12px;color:var(--text-dim);white-space:nowrap;';
+    roleTd.textContent = p.class || '';
+    tr.appendChild(roleTd);
+
+    // Attendance checkboxes
+    for (const raid of raids) {
+      const td = document.createElement('td');
+      td.style.cssText = 'text-align:center;padding:4px;';
+      const present = getPlayerAttendance(p.name, raid.date);
+      const hasCla = window._claPresence?.[normalizeName(p.name)]?.has(raid.date) ?? false;
+      const hasOverride = attendanceData.overrides[normalizeName(p.name)]?.[raid.date] !== undefined;
+
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = present;
+      cb.style.cssText = 'cursor:pointer;width:16px;height:16px;accent-color:' + (hasOverride ? 'var(--gold)' : 'var(--gold-dim)') + ';';
+      cb.title = hasOverride ? 'Manual override' : (hasCla ? 'From CLA' : 'Not in CLA');
+      cb.onchange = (function(name, date) {
+        return function(e) { attendanceToggle(name, date, e.target.checked); };
+      })(p.name, raid.date);
+      td.appendChild(cb);
+      tr.appendChild(td);
+    }
+
+    tbody.appendChild(tr);
+  }
+
+  // Update per-raid attendance counts
+  for (const raid of raids) {
+    const count = players.filter(p => getPlayerAttendance(p.name, raid.date)).length;
+    const el = document.getElementById('att-count-' + raid.date);
+    if (el) el.textContent = count;
+  }
+}
+
+function attendanceFilterRole(val) {
+  _attendanceFilter.role = val;
+  renderAttendancePanel();
+}
+
+function attendanceFilterClass(val) {
+  _attendanceFilter.cls = val;
+  renderAttendancePanel();
+}
+
+function attendanceToggle(playerName, dateStr, value) {
+  setPlayerAttendanceOverride(playerName, dateStr, value);
+  // Re-render just the count for this column
+  const players = rosterData.players.filter(p => !rosterData.excluded?.includes(p.name));
+  const count = players.filter(p => getPlayerAttendance(p.name, dateStr)).length;
+  const el = document.getElementById('att-count-' + dateStr);
+  if (el) el.textContent = count;
+  // Update checkbox styling
+  const key = normalizeName(playerName);
+  const hasOverride = attendanceData.overrides[key]?.[dateStr] !== undefined;
+  // Debounced save
+  _attendancePendingSaves.add(dateStr);
+  clearTimeout(_attendanceSaveTimer);
+  _attendanceSaveTimer = setTimeout(async () => {
+    await saveAttendanceToGitHub();
+    _attendancePendingSaves.clear();
+  }, 1500);
 }
 
 // ── Loot Glossary Panel ──────────────────────────────────────────
@@ -6186,7 +6521,11 @@ function onItemChange() {
     let bestScore = -1;
     for (let i = 0; i < gaps.length; i++) {
       if (gaps[i] < 0.10) continue;
-      const prevGap = i > 0 ? gaps[i - 1] : 0;
+      // Find the last non-zero preceding gap so ties (gap=0) don't reset the baseline
+      let prevGap = 0;
+      for (let j = i - 1; j >= 0; j--) {
+        if (gaps[j] > 0) { prevGap = gaps[j]; break; }
+      }
       const ratio = prevGap > 0 ? gaps[i] / prevGap : gaps[i] * 10;
       const score = gaps[i] * ratio;
       if (score > bestScore) { bestScore = score; cutIdx = i + 1; }
