@@ -19078,5 +19078,11 @@
     "name": "Blood-Stained Pauldrons",
     "slot": "Shoulder",
     "icon": "inv_shoulder_65"
+  },
+  "cyclonewarkilt": {
+    "id": 29042,
+    "name": "Cyclone War-Kilt",
+    "slot": "Legs",
+    "icon": "inv_pants_mail_12"
   }
 }
