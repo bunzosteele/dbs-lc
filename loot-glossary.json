@@ -97,20 +97,7 @@
             "Paladin",
             "Druid"
           ],
-          "prioritization": [
-            {
-              "multiplier": 1.75,
-              "conditions": [
-                "Ranged DPS"
-              ]
-            },
-            {
-              "multiplier": 1.25,
-              "conditions": [
-                "Priest"
-              ]
-            }
-          ],
+          "prioritization": [],
           "roleValues": {
             "Ranged DPS": 1
           }
