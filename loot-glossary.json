@@ -104,6 +104,12 @@
                 "Ranged DPS"
               ],
               "multiplier": 1.75
+            },
+            {
+              "conditions": [
+                "Tanks"
+              ],
+              "multiplier": 1.75
             }
           ],
           "roleValues": {
