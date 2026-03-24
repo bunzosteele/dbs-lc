@@ -6124,23 +6124,37 @@ function onItemChange() {
         if (!candidateEpv) return null;
         const gear = gearListingByPlayer[normalizeName(p.name)]?.slots;
         if (!gear || !_relSlots) return null;
-        const currentNames = _relSlots.map(slot => gear[slot]).filter(Boolean);
+        // For Two-Hand items, compare against the SUM of current Weapon + Off-Hand EPV
+        // since equipping a two-hander means giving up both slots.
+        // For rings/trinkets, compare against the LOWEST EPV current item (replacing weakest).
+        // For all other items, compare against the single current item in that slot.
+        const _isTwoHand = Object.values(bisData).some(slots =>
+          (slots['Two Hand'] || []).some(([id]) => id === _candId)
+        );
+        const _compSlots = _isTwoHand ? ['Weapon', 'Off-Hand'] : _relSlots;
+        const currentNames = _compSlots.map(slot => gear[slot]).filter(Boolean);
         if (!currentNames.length) return null;
         const currentEpvs = currentNames
           .map(n => getPlayerItemEpv(p.name, getItemId(n, p.name)))
           .filter(e => e !== null);
         if (!currentEpvs.length) return null;
-        // For multi-slot items (rings/trinkets), compare against the LOWEST EPV current item
-        // since the player would replace their weakest piece, not both
-        const currentEpv = currentEpvs.length > 1
-          ? Math.min(...currentEpvs)
-          : currentEpvs[0];
+        let currentEpv;
+        if (_isTwoHand) {
+          // Sum both slots — two-hander replaces weapon + off-hand
+          currentEpv = currentEpvs.reduce((a, b) => a + b, 0);
+        } else if (currentEpvs.length > 1) {
+          // Rings/trinkets: compare against weakest piece being replaced
+          currentEpv = Math.min(...currentEpvs);
+        } else {
+          currentEpv = currentEpvs[0];
+        }
         return currentEpv > 0 ? ((candidateEpv - currentEpv) / currentEpv) * 100 : null;
       })(),
     }));
     const hasUpgrade = scored.some(s => s.epvPct !== null && s.epvPct > 5);
     if (!hasUpgrade) return { type: 'open', rollers: [] };
-    const byPrio = scored.filter(s => s.normPr > 0).sort((a, b) => b.normPr - a.normPr);
+    // Only consider players who actually have an upgrade — don't recommend to sidegrades/downgrades
+    const byPrio = scored.filter(s => s.normPr > 0 && s.epvPct !== null && s.epvPct > 5).sort((a, b) => b.normPr - a.normPr);
     if (!byPrio.length) return { type: 'open', rollers: [] };
     if (byPrio.length === 1) return { type: 'restricted', rollers: byPrio, runnerUp: null };
     if (byPrio.length === 2) {
