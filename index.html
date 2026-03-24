@@ -4151,12 +4151,28 @@ function renderAttendancePanel() {
     return true;
   });
 
+  // Compute last attended raid index per player for sorting
+  function lastAttendedIndex(p) {
+    for (let i = raids.length - 1; i >= 0; i--) {
+      if (getPlayerAttendance(p.name, raids[i].date)) return i;
+    }
+    return -1;
+  }
+
+  function isInactive(p) {
+    const last = lastAttendedIndex(p);
+    if (last === -1) return true;
+    return (raids.length - 1 - last) > 2;
+  }
+
   filteredPlayers.sort((a, b) => {
+    const aInactive = isInactive(a), bInactive = isInactive(b);
+    // Inactive players always go to bottom
+    if (aInactive !== bInactive) return aInactive ? 1 : -1;
     const ri = ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role);
     if (ri !== 0) return ri;
-    const ci = (a.class || '').localeCompare(b.class || '');
-    if (ci !== 0) return ci;
-    return a.name.localeCompare(b.name);
+    // Within same role, sort by most recent raid attended (descending)
+    return lastAttendedIndex(b) - lastAttendedIndex(a);
   });
 
   const selStyle = 'background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;';
@@ -4201,7 +4217,26 @@ function renderAttendancePanel() {
   if (!tbody) return;
 
   let lastRole = null;
+  let inactiveHeaderShown = false;
   for (const p of filteredPlayers) {
+    const inactive = isInactive(p);
+
+    // Show INACTIVE divider before the first inactive player
+    if (inactive && !inactiveHeaderShown) {
+      inactiveHeaderShown = true;
+      lastRole = null; // force role headers to re-render after inactive divider if needed
+      const sepRow = document.createElement('tr');
+      const sepTd = document.createElement('td');
+      sepTd.colSpan = 1 + raids.length;
+      sepTd.style.cssText = 'padding:0;';
+      sepTd.innerHTML = `<div class="role-header" style="margin:16px 0 6px;padding:0 4px;opacity:0.5;">
+        <span class="role-title" style="color:var(--text-dim);">INACTIVE</span>
+        <div class="role-line" style="background:linear-gradient(90deg,var(--text-dim),transparent);"></div>
+      </div>`;
+      sepRow.appendChild(sepTd);
+      tbody.appendChild(sepRow);
+    }
+
     // Role separator — matches main tab style
     if (p.role !== lastRole) {
       lastRole = p.role;
@@ -4210,17 +4245,21 @@ function renderAttendancePanel() {
       sepTd.colSpan = 1 + raids.length;
       sepTd.style.cssText = 'padding:0;';
       const roleIcon = ROLE_ICONS[p.role] || '';
-      sepTd.innerHTML = `<div class="role-header" style="margin:12px 0 6px;padding:0 4px;">
+      const titleColor = inactive ? 'color:var(--text-dim);' : '';
+      const lineStyle = inactive ? 'background:linear-gradient(90deg,var(--text-dim),transparent);' : '';
+      sepTd.innerHTML = `<div class="role-header" style="margin:12px 0 6px;padding:0 4px;${inactive ? 'opacity:0.5;' : ''}">
         <span style="font-size:14px;">${roleIcon}</span>
-        <span class="role-title">${p.role}</span>
-        <div class="role-line"></div>
+        <span class="role-title" style="${titleColor}">${p.role}</span>
+        <div class="role-line" style="${lineStyle}"></div>
       </div>`;
       sepRow.appendChild(sepTd);
       tbody.appendChild(sepRow);
     }
 
+    const inactive = isInactive(p);
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid rgba(255,255,255,0.04)';
+    if (inactive) tr.classList.add('inactive-row');
 
     // Name cell with class color and loot toggle
     const nameTd = document.createElement('td');
