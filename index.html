@@ -1325,6 +1325,7 @@ let itemValueMap = {}; // normalized item name -> loot value (number)
 let itemIcons = {}; // item id -> icon name
 let claSheets = [];
 let claDataByPlayer = {};
+let claPlayersByLabel = {}; // label -> Set of normalised player keys
 let canonicalNames = {}; // normalized key -> exact name with special chars from CLA
 let buffScoreByPlayerDate = {}; // normalized name -> { normalizedDate -> pct }
 let latestGearIssuesByPlayer = {}; // normalized name -> { label, issues[] }
@@ -1640,37 +1641,23 @@ function rebuildAttendanceFromCla() {
   // Keep raids sorted chronologically
   attendanceData.raids.sort((a, b) => a.date.localeCompare(b.date));
 
-  // Build CLA-derived presence: player -> set of dates attended
-  // A player is present if their name appears in claDataByPlayer for that label
+  // Build CLA-derived presence from claPlayersByLabel (every player seen in any CLA sheet)
   const claPresence = {}; // playerKey -> Set of dateStr
-  for (const [playerKey, data] of Object.entries(claDataByPlayer)) {
-    const dates = new Set();
-    for (const gi of (data.gearIssues || [])) {
-      const claDate = claRaidDates[gi.label];
-      if (claDate) dates.add(formatAttendanceDate(claDate));
-    }
-    if (dates.size) claPresence[playerKey] = dates;
-  }
-  // Also check buffScoreByPlayerDate
-  for (const [playerKey, dateMap] of Object.entries(buffScoreByPlayerDate || {})) {
-    for (const dateLabel of Object.keys(dateMap)) {
-      // dateLabel is the normalised CLA label — find corresponding date
-      for (const [label, date] of Object.entries(claRaidDates)) {
-        if (normalizeDate(label) === dateLabel || label === dateLabel) {
-          if (!claPresence[playerKey]) claPresence[playerKey] = new Set();
-          claPresence[playerKey].add(formatAttendanceDate(date));
-        }
-      }
-    }
-  }
-  // Also check gearListingByPlayer
-  for (const [playerKey, gearData] of Object.entries(gearListingByPlayer)) {
-    const label = gearData.label;
+  for (const [label, playerKeys] of Object.entries(claPlayersByLabel)) {
     const date = claRaidDates[label];
-    if (date) {
-      if (!claPresence[playerKey]) claPresence[playerKey] = new Set();
-      claPresence[playerKey].add(formatAttendanceDate(date));
+    if (!date) continue;
+    const dateStr = formatAttendanceDate(date);
+    for (const key of playerKeys) {
+      if (!claPresence[key]) claPresence[key] = new Set();
+      claPresence[key].add(dateStr);
     }
+  }
+  // Also catch players who appear in gear listing but had no gear issues tab entry
+  for (const [playerKey, gearData] of Object.entries(gearListingByPlayer)) {
+    const date = claRaidDates[gearData.label];
+    if (!date) continue;
+    if (!claPresence[playerKey]) claPresence[playerKey] = new Set();
+    claPresence[playerKey].add(formatAttendanceDate(date));
   }
 
   // Store CLA-derived presence separately so UI can show it vs overrides
@@ -3752,6 +3739,7 @@ function removeCla(i) {
 
 async function fetchAllClaData() {
   claDataByPlayer = {};
+  claPlayersByLabel = {};
   buffScoreByPlayerDate = {};
   latestGearIssuesByPlayer = {};
   gearListingByPlayer = {};
@@ -3855,6 +3843,9 @@ function parseGearIssues(text, label) {
     const key = normalizeName(player);
     if (!claDataByPlayer[key]) claDataByPlayer[key] = { gearIssues: [], buffConsumables: [] };
     if (issues.length) claDataByPlayer[key].gearIssues.push({ label, issues });
+    // Always record presence regardless of whether they have any issues
+    if (!claPlayersByLabel[label]) claPlayersByLabel[label] = new Set();
+    claPlayersByLabel[label].add(key);
     // Only overwrite if this sheet is more recent than what we have
     // Use C3 date from buff tab if available, otherwise fall back to claSheets array order
     const thisDate = claSheetDates[label] || null;
