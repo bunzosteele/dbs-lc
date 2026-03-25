@@ -1185,7 +1185,6 @@
         </button>
         <div class="nav-dropdown-menu" id="navDdGuildMgmtMenu">
           <button class="group-btn" data-mode="attendance" onclick="navDropdownSelect('navDdGuildMgmt','attendance')">Attendance</button>
-          <button class="group-btn" data-mode="roster" onclick="navDropdownSelect('navDdGuildMgmt','roster')">Roster</button>
           <button class="group-btn" data-mode="cla" onclick="navDropdownSelect('navDdGuildMgmt','cla')">CLA</button>
         </div>
       </div>
@@ -1215,8 +1214,6 @@
 
   <textarea id="claPersist" style="display:none;"></textarea>
 
-  <div id="rosterPanel" style="display:none;padding:16px 0;">
-  </div>
 
   <div id="glossaryPanel" style="display:none;padding:16px 0;">
   </div>
@@ -1537,7 +1534,7 @@ const GROUPING_SUBTITLES = {
 // ── Nav dropdowns ─────────────────────────────────────────────────
 const _navDropdowns = ['navDdGuildMgmt', 'navDdLootMgmt'];
 const _navDropdownModes = {
-  navDdGuildMgmt: ['attendance','roster','cla'],
+  navDdGuildMgmt: ['attendance','cla'],
   navDdLootMgmt:  ['glossary','bis','lootlog'],
 };
 
@@ -1597,7 +1594,7 @@ function setGrouping(mode) {
   document.getElementById('glossaryPanel').style.display   = isGlossary   ? 'block' : 'none';
   document.getElementById('attendancePanel').style.display = isAttendance ? 'block' : 'none';
   document.getElementById('lootlogPanel').style.display    = isLootLog    ? 'block' : 'none';
-  document.getElementById('output').style.display      = (!isLoot && !isCla && !isBis && !isRoster && !isGlossary && !isAttendance && !isLootLog) ? 'block' : 'none';
+  document.getElementById('output').style.display      = (!isLoot && !isCla && !isBis && !isGlossary && !isAttendance && !isLootLog) ? 'block' : 'none';
   if (isLoot) {
     // Sync glossary selection → loot tab
     if (_glossaryState.item && _glossaryState.raid && _glossaryState.boss) {
@@ -3613,6 +3610,21 @@ function buildTierProgressHtml(playerName) {
 }
 
 
+
+function rosterUpdatePlayer(name, newRole, newClass) {
+  const p = rosterData.players.find(p => p.name === name);
+  if (!p) return;
+  p.role = newRole;
+  p.class = newClass;
+  saveRosterToGitHub();
+  // Re-render attendance so colors/role grouping update
+  if (groupingMode === 'attendance') renderAttendancePanel();
+}
+
+function rosterGetClassesForRole(role) {
+  return ROLE_CLASSES[role] || [];
+}
+
 // Assign currently selected loot-tab item to a player from within their loot dropdown
 function lootLogAssignFromLootTab(playerName, itemName) {
   if (!lootDistribution.raids.length) {
@@ -3720,6 +3732,35 @@ function toggleLoot(td, playerName) {
 
   // Tier set progress section
   html += buildTierProgressHtml(playerName);
+
+  // Role / Class edit section (only when write token present)
+  if (writeToken) {
+    const _p = rosterData.players.find(p => normalizeName(p.name) === normalizeName(playerName));
+    if (_p) {
+      const _allRoles = ['Tanks','Physical DPS','Ranged DPS','Healers'];
+      const _roleOpts = _allRoles.map(r => `<option value="${r}" ${r===_p.role?'selected':''}>${r}</option>`).join('');
+      const _classOpts = (ROLE_CLASSES[_p.role]||[]).map(c => `<option value="${c}" ${c===_p.class?'selected':''}>${c}</option>`).join('');
+      html += `<div class="expand-section-title" style="margin-top:12px;">Edit Player</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+          <select id="editRole_${normalizeName(playerName)}" onchange="
+            var r=this.value;
+            var cs=document.getElementById('editClass_${normalizeName(playerName)}');
+            cs.innerHTML=(ROLE_CLASSES[r]||[]).map(c=>'<option value=\''+c+'\'>'+c+'</option>').join('');
+          " style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:13px;">
+            ${_roleOpts}
+          </select>
+          <select id="editClass_${normalizeName(playerName)}" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:13px;">
+            ${_classOpts}
+          </select>
+          <button onclick="
+            var r=document.getElementById('editRole_${normalizeName(playerName)}').value;
+            var c=document.getElementById('editClass_${normalizeName(playerName)}').value;
+            rosterUpdatePlayer('${playerName.replace(/'/g,"\\'")}',r,c);
+          " style="background:var(--gold-dim);border:none;color:var(--bg);padding:5px 12px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;">SAVE</button>
+          <button onclick="if(confirm('Remove ${playerName.replace(/'/g,"\\'")} from roster?'))rosterRemovePlayer('${playerName.replace(/'/g,"\\'")}');" style="background:none;border:1px solid var(--border);color:var(--text-dim);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Remove from Roster</button>
+        </div>`;
+    }
+  }
 
   html += `</td>`;
   lootTr.innerHTML = html;
@@ -3836,7 +3877,7 @@ function clearGithubToken() {
   writeToken = '';
   try { localStorage.removeItem('writeToken'); } catch(e) {}
   // If currently in CLA mode, switch back to role view
-  if (['cla','bis','roster','glossary','attendance','lootlog'].includes(groupingMode)) setGrouping('role');
+  if (['cla','bis','glossary','attendance','lootlog'].includes(groupingMode)) setGrouping('role');
   updateAuthState();
 }
 
@@ -4881,8 +4922,54 @@ function renderAttendancePanel() {
           <tbody id="attendanceTableBody"></tbody>
         </table>
       </div>
+
+      <!-- Add Raider + CLA recommendations -->
+      <div style="margin-top:24px;display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+        <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;flex:0 0 auto;">
+          <div style="font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:12px;">ADD RAIDER</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <label style="font-size:11px;color:var(--text-dim);">Name</label>
+              <input id="rosterAddName" class="write-gated" placeholder="Player name" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;width:150px;" oninput="rosterCheckAddReady()">
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <label style="font-size:11px;color:var(--text-dim);">Role</label>
+              <select id="rosterAddRole" class="write-gated" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;" onchange="rosterUpdateClassOptions();rosterCheckAddReady()">
+                <option value="">— Role —</option>
+                ${ROLE_ORDER.map(r => `<option value="${r}">${r}</option>`).join('')}
+              </select>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:4px;">
+              <label style="font-size:11px;color:var(--text-dim);">Class</label>
+              <select id="rosterAddClass" class="write-gated" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;" onchange="rosterCheckAddReady()" disabled>
+                <option value="">— Select role first —</option>
+              </select>
+            </div>
+            <button id="rosterAddBtn" class="gloss-btn-saveable write-gated" onclick="rosterAddPlayer()" style="background:var(--gold-dim);border:none;color:var(--bg);padding:7px 16px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.1em;transition:background 0.15s,box-shadow 0.15s;">ADD</button>
+          </div>
+        </div>
+        <div id="attendanceClaRecs" style="flex:1;min-width:200px;"></div>
+      </div>
+
     </div>
   `;
+
+  // Render CLA recommendations
+  const _recs = getRosterClaRecommendations();
+  const _recsEl = document.getElementById('attendanceClaRecs');
+  if (_recsEl && _recs.length) {
+    _recsEl.innerHTML = '<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;">' +
+      '<div style="font-family:\'Cinzel\',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:4px;">SEEN IN CLA — NOT ON ROSTER</div>' +
+      '<div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">These players appear in CLA exports but are not on the roster.</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
+      _recs.map(key =>
+        '<div style="display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 10px;">' +
+        '<span style="font-size:13px;color:var(--text);">' + key + '</span>' +
+        '<button class="write-gated" onclick="rosterExcludePlayer(\'' + key + '\')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:12px;padding:0 2px;">✕</button>' +
+        '</div>'
+      ).join('') +
+      '</div></div>';
+  }
 
   const tbody = document.getElementById('attendanceTableBody');
   if (!tbody) return;
