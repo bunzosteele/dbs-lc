@@ -2486,7 +2486,7 @@ async function deriveKey(password) {
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: enc.encode('dbs-lc-salt'), iterations: 100000, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: enc.encode(WCL_ENCRYPTION_SALT), iterations: 100000, hash: 'SHA-256' },
     keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']
   );
 }
@@ -2589,6 +2589,10 @@ let wclData = {}; // normalized name -> { points, rank, outOf }
 
 let GITHUB_REPO = '';
 let CF_WORKER_URL = '';
+let GUILD_NAME = "Don't Be Suspicious";
+let GUILD_SUBTITLE = 'Loot Council Summary';
+let PAGE_TITLE = 'DBS LC';
+let ENABLE_WCL = false; // default off until config loaded
 const GITHUB_FILE = 'cla-sheets.json';
 const GEAR_IDS_FILE = 'gear-item-ids.json';
 let gearItemIds = {}; // item name (lowercase) -> wowhead item ID
@@ -2671,11 +2675,10 @@ async function wclGraphQL(query, token) {
 }
 
 async function fetchWclAllStars(realm) {
+  if (!ENABLE_WCL) return;
   const token = await getWclToken();
   if (!token) return;
-  // Zone 1008 = Gruul's Lair + Magtheridon's Lair on TBC Classic Anniversary
-  const zone = { id: 1048, name: "Gruul / Magtheridon" };
-  console.log('Using hardcoded WCL zone:', zone.id, zone.name);
+  const zone = { id: WCL_ZONE_ID, name: WCL_ZONE_NAME };
   try {
 
     // Build player list with their role for metric selection
@@ -4335,7 +4338,7 @@ function parseBuffConsumables(text, label) {
 // Initialise CLA list on load (after all functions defined)
 claSheets = loadClaSheets();
 renderClaList();
-initWclIfSaved();
+if (typeof ENABLE_WCL === 'undefined' || ENABLE_WCL) initWclIfSaved();
 
 
 // Auto-load CLA sheets from repo JSON if no sheets saved locally
@@ -4396,12 +4399,31 @@ async function loadGearItemIdsFromRepo() {
 (async () => {
   try {
     const cfg = await fetch('./config.json?t=' + Date.now()).then(r => r.json());
-    if (cfg.cf_worker_url) CF_WORKER_URL  = cfg.cf_worker_url.trim().replace(/\/+$/, '');
-    if (cfg.github_repo)   GITHUB_REPO   = cfg.github_repo;
-    if (cfg.sheet_id)      SHEET_ID      = cfg.sheet_id;
-    if (cfg.apps_script)   APPS_SCRIPT   = cfg.apps_script;
-    if (cfg.icon_script)   ICON_SCRIPT   = cfg.icon_script;
-    console.log('config.json loaded — worker:', CF_WORKER_URL);
+    if (cfg.cf_worker_url)       CF_WORKER_URL        = cfg.cf_worker_url.trim().replace(/\/+$/, '');
+    if (cfg.github_repo)         GITHUB_REPO          = cfg.github_repo;
+    if (cfg.sheet_id)            SHEET_ID             = cfg.sheet_id;
+    if (cfg.apps_script)         APPS_SCRIPT          = cfg.apps_script;
+    if (cfg.icon_script)         ICON_SCRIPT          = cfg.icon_script;
+    if (cfg.guild_name)          GUILD_NAME           = cfg.guild_name;
+    if (cfg.guild_subtitle)      GUILD_SUBTITLE       = cfg.guild_subtitle;
+    if (cfg.page_title)          PAGE_TITLE           = cfg.page_title;
+    if (cfg.enable_wcl != null)  ENABLE_WCL           = !!cfg.enable_wcl;
+    if (cfg.wcl_client_id)       WCL_CLIENT_ID        = cfg.wcl_client_id;
+    if (cfg.wcl_realm)           WCL_REALM            = cfg.wcl_realm;
+    if (cfg.wcl_zone_id)         WCL_ZONE_ID          = cfg.wcl_zone_id;
+    if (cfg.wcl_zone_name)       WCL_ZONE_NAME        = cfg.wcl_zone_name;
+    if (cfg.wcl_encryption_salt) WCL_ENCRYPTION_SALT  = cfg.wcl_encryption_salt;
+    // Apply branding
+    document.title = PAGE_TITLE;
+    const h1 = document.querySelector('header h1');
+    const sub = document.querySelector('header .subtitle');
+    if (h1)  h1.textContent  = GUILD_NAME;
+    if (sub) sub.textContent = GUILD_SUBTITLE;
+    // Show/hide WCL UI
+    const wclSec = document.getElementById('wclSection');
+    if (wclSec) wclSec.style.display = ENABLE_WCL ? '' : 'none';
+    if (!ENABLE_WCL) document.body.classList.add('wcl-hidden');
+    console.log('config.json loaded — worker:', CF_WORKER_URL, '| WCL:', ENABLE_WCL);
   } catch(e) {
     console.warn('config.json not found or invalid — using defaults:', e.message);
   }
@@ -4507,13 +4529,15 @@ function boot() {
 loadClaSheetsFromRepo().then(async () => {
   await Promise.all([loadGearItemIdsFromRepo(), loadBisDataFromRepo(), loadRosterFromRepo(), loadLootGlossaryFromRepo(), loadSetBonusesFromRepo(), loadAttendanceFromRepo(), loadLootDistributionFromRepo()]);
   // Handle PKCE callback first (page may have been redirected back from WarcraftLogs)
-  const wasCallback = await handleWclCallback();
+  const wasCallback = ENABLE_WCL ? await handleWclCallback() : false;
   await fetchData();
   _urlRestoreState();
   // Always try to fetch WCL after data is loaded (callback or existing token)
-  const token = await getWclToken();
-  if (token) {
-    fetchWclAllStars(WCL_REALM);
+  if (ENABLE_WCL) {
+    const token = await getWclToken();
+    if (token) {
+      fetchWclAllStars(WCL_REALM);
+    }
   }
 });
 } // end boot()
