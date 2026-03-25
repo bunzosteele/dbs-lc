@@ -998,13 +998,15 @@
     background: var(--bg2);
     border: 1px solid var(--border);
     color: var(--text);
-    padding: 8px 12px;
+    padding: 10px 12px;
     font-family: 'Crimson Pro', serif;
     font-size: 15px;
     outline: none;
     cursor: pointer;
     transition: border-color 0.15s;
     width: 100%;
+    box-sizing: border-box;
+    height: 44px;
   }
 
   .loot-select:focus { border-color: var(--gold-dim); }
@@ -6883,12 +6885,12 @@ function onItemChange() {
   const _glossNote = entry.notes || '';
   const itemHeaderHtml = itemId
     ? `<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
-        <div style="display:flex;align-items:center;gap:12px;flex-shrink:0;">
+        <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;overflow:hidden;">
           ${itemIconHtml}
-          <a href="https://www.wowhead.com/tbc/item=${itemId}" data-wowhead="item=${itemId}&dataset=tbc" target="_blank" rel="noopener" style="font-family:'Cinzel',serif;font-size:16px;color:var(--gold);text-decoration:none;">${item}</a>
+          <a href="https://www.wowhead.com/tbc/item=${itemId}" data-wowhead="item=${itemId}&dataset=tbc" target="_blank" rel="noopener" style="font-family:'Cinzel',serif;font-size:16px;color:var(--gold);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${item}</a>
         </div>
         ${_glossNote ? `<div style="flex:1;text-align:center;padding:0 16px;font-size:13px;color:var(--text-dim);font-style:italic;">${_glossNote}</div>` : '<div style="flex:1;"></div>'}
-        <div id="lootRecommendation" style="width:320px;flex-shrink:0;"></div>
+        <div id="lootRecommendation" style="flex:1;text-align:center;"></div>
        </div>`
     : `<div style="margin-bottom:16px;font-family:'Cinzel',serif;font-size:16px;color:var(--gold);">${item}</div>`;
 
