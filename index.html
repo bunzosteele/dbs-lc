@@ -1050,6 +1050,7 @@
     <button class="group-btn" data-mode="roster" onclick="setGrouping('roster')">Roster</button>
     <button class="group-btn" data-mode="glossary" onclick="setGrouping('glossary')">Loot Glossary</button>
     <button class="group-btn" data-mode="attendance" onclick="setGrouping('attendance')">Attendance</button>
+    <button class="group-btn" data-mode="lootlog" onclick="setGrouping('lootlog')">Loot Log</button>
   </div>
 
   <div class="controls">
@@ -1072,6 +1073,9 @@
   </div>
 
   <div id="attendancePanel" style="display:none;padding:16px 0;">
+  </div>
+
+  <div id="lootlogPanel" style="display:none;padding:16px 0;">
   </div>
 
   <div id="lootPanel" style="display:none;">
@@ -1327,6 +1331,7 @@ function normalizeDate(d) {
 }
 
 let lootByPlayer = {};
+let lootDistribution = { raids: [] }; // loaded from loot-distribution.json
 let itemMap = {}; // normalized item name -> { id, name }
 let itemValueMap = {}; // normalized item name -> loot value (number)
 let itemIcons = {}; // item id -> icon name
@@ -1381,13 +1386,15 @@ function setGrouping(mode) {
   const isRoster  = mode === 'roster';
   const isGlossary = mode === 'glossary';
   const isAttendance = mode === 'attendance';
+  const isLootLog = mode === 'lootlog';
   document.getElementById('lootPanel').style.display   = isLoot   ? 'block' : 'none';
   document.getElementById('claPanel').style.display    = isCla    ? 'block' : 'none';
   document.getElementById('bisPanel').style.display    = isBis    ? 'block' : 'none';
   document.getElementById('rosterPanel').style.display   = isRoster   ? 'block' : 'none';
   document.getElementById('glossaryPanel').style.display   = isGlossary   ? 'block' : 'none';
   document.getElementById('attendancePanel').style.display = isAttendance ? 'block' : 'none';
-  document.getElementById('output').style.display      = (!isLoot && !isCla && !isBis && !isRoster && !isGlossary && !isAttendance) ? 'block' : 'none';
+  document.getElementById('lootlogPanel').style.display    = isLootLog    ? 'block' : 'none';
+  document.getElementById('output').style.display      = (!isLoot && !isCla && !isBis && !isRoster && !isGlossary && !isAttendance && !isLootLog) ? 'block' : 'none';
   if (isLoot) {
     // Sync glossary selection → loot tab
     if (_glossaryState.item && _glossaryState.raid && _glossaryState.boss) {
@@ -1433,6 +1440,8 @@ function setGrouping(mode) {
     renderGlossaryPanel();
   } else if (isAttendance) {
     renderAttendancePanel();
+  } else if (isLootLog) {
+    renderLootLogPanel();
   } else if (lastRenderData.roles.length) {
     render(lastRenderData);
   }
@@ -1597,7 +1606,9 @@ async function loadSetBonusesFromRepo() {
 }
 
 async function saveSetBonusesToGitHub() {
-  await saveJsonToGitHub('set-bonuses.json', setBonusData);
+  try {
+    await saveJsonToGitHub('set-bonuses.json', setBonusData);
+  } catch(e) { handleSaveError(e, 'set-bonuses.json'); }
 }
 
 
@@ -1618,7 +1629,9 @@ async function loadAttendanceFromRepo() {
 }
 
 async function saveAttendanceToGitHub() {
-  await saveJsonToGitHub('attendance.json', attendanceData);
+  try {
+    await saveJsonToGitHub('attendance.json', attendanceData);
+  } catch(e) { handleSaveError(e, 'attendance.json'); }
 }
 
 // Build attendance data from CLA sheets — called after fetchAllClaData()
@@ -1775,6 +1788,24 @@ function buildAttendanceRenderData() {
   });
 
   return { dates, roles };
+}
+
+async function loadLootDistributionFromRepo() {
+  try {
+    const data = await fetchFromWorker('loot-distribution.json');
+    if (data && Array.isArray(data.raids)) {
+      lootDistribution = data;
+      console.log('Loaded loot-distribution.json:', data.raids.length, 'raids');
+    }
+  } catch(e) {
+    console.warn('loot-distribution.json load error:', e.message);
+  }
+}
+
+async function saveLootDistributionToGitHub() {
+  try {
+    await saveJsonToGitHub('loot-distribution.json', lootDistribution);
+  } catch(e) { handleSaveError(e, 'loot-distribution.json'); }
 }
 
 async function loadRosterFromRepo() {
@@ -2156,6 +2187,23 @@ function computePointsByPlayer(roles) {
     }
   }
   return computed;
+}
+
+function buildLootByPlayerFromDistribution() {
+  const result = {};
+  // Process raids in chronological order, then reverse per player for recency
+  for (const raid of [...lootDistribution.raids].sort((a,b) => a.date.localeCompare(b.date))) {
+    for (const entry of (raid.items || [])) {
+      if (!entry.item || !entry.recipient) continue;
+      const key = normalizeName(entry.recipient);
+      if (!result[key]) result[key] = [];
+      const itemId = getItemId(entry.item);
+      const value = itemId ? getItemLootValue(entry.recipient, itemId) : 0;
+      result[key].push({ name: entry.item, value });
+    }
+  }
+  for (const key in result) result[key].reverse();
+  return result;
 }
 
 function parseLoot(text) {
@@ -2612,11 +2660,17 @@ async function fetchData() {
     fetchItemMap(); // instant — populates from static map
 
     // Fire all fetches in parallel
-    const [, lootText] = await Promise.all([
+    await Promise.all([
       fetchAllClaData(),
-      fetchSheet(SHEET_ID, '964257878').catch(e => { addError('Loot Sheet (gid: 964257878)', e.message); return ''; }),
+      // Legacy loot sheet kept as fallback — will be removed once loot-distribution.json is seeded
+      fetchSheet(SHEET_ID, '964257878')
+        .then(text => { if (text && !lootDistribution.raids.length) lootByPlayer = parseLoot(text); })
+        .catch(() => {}),
     ]);
-    if (lootText) lootByPlayer = parseLoot(lootText);
+    // Build lootByPlayer from loot-distribution.json if it has data
+    if (lootDistribution.raids.length) {
+      lootByPlayer = buildLootByPlayerFromDistribution();
+    }
 
     // Build attendance from CLA data
     rebuildAttendanceFromCla();
@@ -3531,7 +3585,7 @@ function clearGithubToken() {
   writeToken = '';
   try { localStorage.removeItem('writeToken'); } catch(e) {}
   // If currently in CLA mode, switch back to role view
-  if (['cla','bis','roster','glossary','attendance'].includes(groupingMode)) setGrouping('role');
+  if (['cla','bis','roster','glossary','attendance','lootlog'].includes(groupingMode)) setGrouping('role');
   updateAuthState();
 }
 
@@ -3986,7 +4040,7 @@ async function loadGearItemIdsFromRepo() {
 
 function boot() {
 loadClaSheetsFromRepo().then(async () => {
-  await Promise.all([loadGearItemIdsFromRepo(), loadBisDataFromRepo(), loadRosterFromRepo(), loadLootGlossaryFromRepo(), loadSetBonusesFromRepo(), loadAttendanceFromRepo()]);
+  await Promise.all([loadGearItemIdsFromRepo(), loadBisDataFromRepo(), loadRosterFromRepo(), loadLootGlossaryFromRepo(), loadSetBonusesFromRepo(), loadAttendanceFromRepo(), loadLootDistributionFromRepo()]);
   // Handle PKCE callback first (page may have been redirected back from WarcraftLogs)
   const wasCallback = await handleWclCallback();
   await fetchData();
@@ -4109,6 +4163,257 @@ function setBonusRemove(threshold, idx) {
   renderGlossaryPanel();
 }
 
+
+
+// ── Loot Log Panel ────────────────────────────────────────────────
+
+let _lootLogExpanded = new Set(); // set of dates currently expanded
+
+function renderLootLogPanel() {
+  const panel = document.getElementById('lootlogPanel');
+  if (!panel) return;
+
+  const raids = [...lootDistribution.raids].sort((a, b) => b.date.localeCompare(a.date));
+
+  panel.innerHTML = `
+    <div style="max-width:900px;">
+      <!-- Header + Add Raid -->
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;flex-wrap:wrap;gap:8px;">
+        <div style="font-family:'Cinzel',serif;font-size:13px;letter-spacing:0.15em;color:var(--gold-dim);">${raids.length} RAIDS RECORDED</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <input type="date" id="lootlogDateInput"
+            style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;"
+            oninput="document.getElementById('lootlogAddBtn')?.classList.toggle('gloss-btn-ready', !!this.value)" />
+          <button id="lootlogAddBtn" class="gloss-btn-saveable"
+            onclick="lootLogAddRaid()"
+            style="background:var(--gold-dim);border:none;color:var(--bg);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;transition:background 0.15s,box-shadow 0.15s;">
+            + ADD RAID
+          </button>
+        </div>
+      </div>
+
+      <!-- Raid list -->
+      <div id="lootlogRaidList"></div>
+    </div>
+  `;
+
+  renderLootLogRaidList();
+}
+
+function renderLootLogRaidList() {
+  const container = document.getElementById('lootlogRaidList');
+  if (!container) return;
+
+  const raids = [...lootDistribution.raids].sort((a, b) => b.date.localeCompare(a.date));
+
+  if (!raids.length) {
+    container.innerHTML = '<div style="color:var(--text-dim);font-style:italic;font-size:13px;">No raids recorded yet. Add a raid to get started.</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+
+  for (const raid of raids) {
+    const expanded = _lootLogExpanded.has(raid.date);
+    const items = raid.items || [];
+
+    // Collect item icons for the collapsed row preview
+    const iconHtml = items.slice(0, 20).map(entry => {
+      const id = getItemId(entry.item);
+      if (!id || !itemIcons[id]) return '';
+      return `<img src="https://wow.zamimg.com/images/wow/icons/small/${itemIcons[id]}.jpg"
+        style="width:20px;height:20px;border:1px solid #333;border-radius:2px;flex-shrink:0;"
+        title="${entry.item} → ${entry.recipient}" />`;
+    }).join('');
+    const moreCount = items.length > 20 ? `<span style="font-size:11px;color:var(--text-dim);margin-left:4px;">+${items.length - 20} more</span>` : '';
+
+    const raidDiv = document.createElement('div');
+    raidDiv.style.cssText = 'border:1px solid var(--border);border-radius:6px;margin-bottom:8px;overflow:hidden;';
+
+    // Header row
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;gap:12px;padding:10px 14px;cursor:pointer;background:var(--bg2);user-select:none;';
+    header.onclick = () => lootLogToggleRaid(raid.date);
+    header.innerHTML = `
+      <span style="font-size:12px;color:var(--text-dim);transition:transform 0.15s;display:inline-block;transform:${expanded ? 'rotate(90deg)' : 'rotate(0deg)'}">▶</span>
+      <span style="font-family:'Cinzel',serif;font-size:13px;color:var(--gold);min-width:80px;">${raid.label}</span>
+      <span style="font-size:12px;color:var(--text-dim);">${items.length} item${items.length !== 1 ? 's' : ''}</span>
+      <div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;flex:1;">${iconHtml}${moreCount}</div>
+    `;
+    raidDiv.appendChild(header);
+
+    // Expanded content
+    if (expanded) {
+      const body = document.createElement('div');
+      body.style.cssText = 'padding:12px 14px;border-top:1px solid var(--border);';
+
+      // Add item form
+      body.innerHTML = `
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
+          <div id="lootlogItemDropdown_${raid.date}" style="position:relative;min-width:220px;"></div>
+          <input id="lootlogRecipient_${raid.date}" placeholder="Recipient"
+            list="lootlogPlayerList"
+            style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;width:150px;"
+            oninput="lootLogCheckAddItemReady('${raid.date}')" />
+          <datalist id="lootlogPlayerList">
+            ${rosterData.players.map(p => `<option value="${p.name}">`).join('')}
+          </datalist>
+          <button id="lootlogAddItemBtn_${raid.date}" class="gloss-btn-saveable"
+            onclick="lootLogAddItem('${raid.date}')"
+            style="background:var(--gold-dim);border:none;color:var(--bg);padding:6px 14px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;transition:background 0.15s,box-shadow 0.15s;">
+            + ADD ITEM
+          </button>
+        </div>
+        <div id="lootlogItems_${raid.date}"></div>
+      `;
+      raidDiv.appendChild(body);
+
+      // Render items table
+      setTimeout(() => {
+        lootLogRenderItems(raid.date);
+        lootLogInitItemDropdown(raid.date);
+      }, 0);
+    }
+
+    container.appendChild(raidDiv);
+  }
+}
+
+function lootLogInitItemDropdown(dateStr) {
+  const container = document.getElementById(`lootlogItemDropdown_${dateStr}`);
+  if (!container) return;
+  // Build a searchable item list from glossary
+  const allItems = [];
+  for (const [raid, bosses] of Object.entries(lootGlossary.raids || {})) {
+    for (const [boss, items] of Object.entries(bosses)) {
+      for (const entry of items) {
+        allItems.push(entry.item);
+      }
+    }
+  }
+  allItems.sort();
+  const inputId = `lootlogItemInput_${dateStr}`;
+  container.innerHTML = `
+    <input id="${inputId}" placeholder="Item name" list="lootlogItemList_${dateStr}"
+      style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;width:100%;"
+      oninput="lootLogCheckAddItemReady('${dateStr}')" />
+    <datalist id="lootlogItemList_${dateStr}">
+      ${allItems.map(i => `<option value="${i}">`).join('')}
+    </datalist>
+  `;
+}
+
+function lootLogCheckAddItemReady(dateStr) {
+  const item = document.getElementById(`lootlogItemInput_${dateStr}`)?.value.trim();
+  const recipient = document.getElementById(`lootlogRecipient_${dateStr}`)?.value.trim();
+  const btn = document.getElementById(`lootlogAddItemBtn_${dateStr}`);
+  if (btn) btn.classList.toggle('gloss-btn-ready', !!(item && recipient));
+}
+
+function lootLogRenderItems(dateStr) {
+  const container = document.getElementById(`lootlogItems_${dateStr}`);
+  if (!container) return;
+  const raid = lootDistribution.raids.find(r => r.date === dateStr);
+  if (!raid) return;
+  const items = raid.items || [];
+  if (!items.length) {
+    container.innerHTML = '<div style="color:var(--text-dim);font-style:italic;font-size:12px;">No items recorded for this raid.</div>';
+    return;
+  }
+
+  let html = `<table style="border-collapse:collapse;width:100%;">
+    <thead><tr style="border-bottom:1px solid var(--border);">
+      <th style="text-align:left;padding:4px 8px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.15em;color:var(--text-dim);">ITEM</th>
+      <th style="text-align:left;padding:4px 8px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.15em;color:var(--text-dim);">RECIPIENT</th>
+      <th style="text-align:right;padding:4px 8px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.15em;color:var(--text-dim);">WEIGHTED EPV</th>
+      <th style="width:32px;"></th>
+    </tr></thead>
+    <tbody>`;
+
+  items.forEach((entry, idx) => {
+    const itemId = getItemId(entry.item);
+    const epv = itemId ? getWeightedItemEpv(entry.recipient, itemId) : 0;
+    const epvColor = lootValueColor(epv);
+    const iconHtml = itemId && itemIcons[itemId]
+      ? `<img src="https://wow.zamimg.com/images/wow/icons/small/${itemIcons[itemId]}.jpg" style="width:16px;height:16px;border-radius:2px;vertical-align:middle;margin-right:6px;" />`
+      : '';
+    const link = itemId
+      ? `<a href="https://www.wowhead.com/tbc/item=${itemId}" data-wowhead="item=${itemId}&dataset=tbc" target="_blank" rel="noopener" style="color:var(--gold-light);text-decoration:none;">${iconHtml}${entry.item}</a>`
+      : `${iconHtml}${entry.item}`;
+    const recipientColor = classColor(entry.recipient) || 'var(--text)';
+
+    html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+      <td style="padding:5px 8px;font-size:13px;">${link}</td>
+      <td style="padding:5px 8px;font-size:13px;color:${recipientColor};">${entry.recipient}</td>
+      <td style="padding:5px 8px;font-size:13px;color:${epvColor};text-align:right;">${epv > 0 ? epv.toFixed(1) : '—'}</td>
+      <td style="padding:5px 8px;text-align:center;">
+        <button onclick="lootLogRemoveItem('${dateStr}', ${idx})"
+          style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;padding:0 4px;"
+          title="Remove item">✕</button>
+      </td>
+    </tr>`;
+  });
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+  setTimeout(() => { if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks(); }, 200);
+}
+
+function lootLogToggleRaid(dateStr) {
+  if (_lootLogExpanded.has(dateStr)) {
+    _lootLogExpanded.delete(dateStr);
+  } else {
+    _lootLogExpanded.add(dateStr);
+  }
+  renderLootLogRaidList();
+}
+
+function lootLogAddRaid() {
+  const input = document.getElementById('lootlogDateInput');
+  if (!input?.value) return;
+  const dateStr = input.value;
+  if (lootDistribution.raids.find(r => r.date === dateStr)) return;
+  const date = new Date(dateStr + 'T12:00:00');
+  lootDistribution.raids.push({ date: dateStr, label: formatRaidLabel(date), items: [] });
+  lootDistribution.raids.sort((a, b) => a.date.localeCompare(b.date));
+  input.value = '';
+  document.getElementById('lootlogAddBtn')?.classList.remove('gloss-btn-ready');
+  saveLootDistributionToGitHub();
+  renderLootLogPanel();
+}
+
+function lootLogAddItem(dateStr) {
+  const item = document.getElementById(`lootlogItemInput_${dateStr}`)?.value.trim();
+  const recipient = document.getElementById(`lootlogRecipient_${dateStr}`)?.value.trim();
+  if (!item || !recipient) return;
+  const raid = lootDistribution.raids.find(r => r.date === dateStr);
+  if (!raid) return;
+  if (!raid.items) raid.items = [];
+  raid.items.push({ item, recipient });
+  // Update lootByPlayer immediately
+  lootByPlayer = buildLootByPlayerFromDistribution();
+  saveLootDistributionToGitHub();
+  lootLogRenderItems(dateStr);
+  // Clear inputs
+  const itemInput = document.getElementById(`lootlogItemInput_${dateStr}`);
+  const recInput = document.getElementById(`lootlogRecipient_${dateStr}`);
+  if (itemInput) itemInput.value = '';
+  if (recInput) recInput.value = '';
+  document.getElementById(`lootlogAddItemBtn_${dateStr}`)?.classList.remove('gloss-btn-ready');
+  // Re-render the header icons
+  renderLootLogRaidList();
+}
+
+function lootLogRemoveItem(dateStr, idx) {
+  const raid = lootDistribution.raids.find(r => r.date === dateStr);
+  if (!raid || !raid.items) return;
+  if (!confirm(`Remove "${raid.items[idx]?.item}" awarded to ${raid.items[idx]?.recipient}?`)) return;
+  raid.items.splice(idx, 1);
+  lootByPlayer = buildLootByPlayerFromDistribution();
+  saveLootDistributionToGitHub();
+  lootLogRenderItems(dateStr);
+  renderLootLogRaidList();
+}
 
 // ── Attendance Panel ──────────────────────────────────────────────
 
@@ -4344,7 +4649,9 @@ async function attendanceSave() {
 // ── Loot Glossary Panel ──────────────────────────────────────────
 
 async function saveGlossaryToGitHub() {
-  await saveJsonToGitHub('loot-glossary.json', lootGlossary);
+  try {
+    await saveJsonToGitHub('loot-glossary.json', lootGlossary);
+  } catch(e) { handleSaveError(e, 'loot-glossary.json'); }
 }
 
 function getGlossaryEntry(raid, boss, item) {
@@ -4814,7 +5121,9 @@ function glossarySaveClasses() {
 // ── Roster Panel ─────────────────────────────────────────────────
 
 async function saveRosterToGitHub() {
-  await saveJsonToGitHub('roster.json', rosterData);
+  try {
+    await saveJsonToGitHub('roster.json', rosterData);
+  } catch(e) { handleSaveError(e, 'roster.json'); }
 }
 
 function getRosterClaRecommendations() {
@@ -5619,8 +5928,7 @@ async function migrateFromGitHub() {
   const btn = document.getElementById('migrateBtn');
   if (!CF_WORKER_URL) { alert('CF_WORKER_URL not set in source.'); return; }
   if (!writeToken) { alert('Write token required.'); return; }
-  // Diagnostic: confirm token length and value to catch whitespace/copy-paste issues
-  console.log(`[migrate] writeToken length=${writeToken.length} value="${writeToken}"`);
+  if (!confirm('This will overwrite all Worker KV data with the current GitHub Pages JSON files.\n\nThis should only be done once during initial setup. Continue?')) return;
   const files = [
     'loot-glossary.json', 'roster.json', 'attendance.json',
     'bis-data.json', 'gear-item-ids.json', 'set-bonuses.json',
@@ -5651,37 +5959,88 @@ async function migrateFromGitHub() {
 
 // ── Storage: Cloudflare Worker ───────────────────────────────────
 
-async function fetchFromWorker(filename) {
-  if (!CF_WORKER_URL) throw new Error('CF_WORKER_URL not configured');
-  // Normalise: ensure absolute URL with https:// and no trailing slash
+// ── Version tracking (optimistic locking) ────────────────────────
+// Tracks the _v value seen when each file was last loaded.
+// If the Worker has a newer version at save time, the save is rejected.
+const _loadedVersions = {};
+
+function _workerBase() {
   let base = CF_WORKER_URL.trim().replace(/\/+$/, '');
   if (!base.startsWith('http://') && !base.startsWith('https://')) base = 'https://' + base;
-  const res = await fetch(`${base}/${filename}`, { cache: 'no-store' });
+  return base;
+}
+
+async function fetchFromWorker(filename) {
+  if (!CF_WORKER_URL) throw new Error('CF_WORKER_URL not configured');
+  const res = await fetch(`${_workerBase()}/${filename}`, { cache: 'no-store' });
   if (!res.ok) throw new Error(`Worker fetch failed for ${filename}: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  // Record the version we loaded so we can detect conflicts on save
+  if (data && typeof data._v === 'number') _loadedVersions[filename] = data._v;
+  return data;
 }
 
 async function saveJsonToGitHub(filename, data) {
   if (!CF_WORKER_URL) throw new Error('CF_WORKER_URL not configured — set it in the dashboard source');
   if (!writeToken) throw new Error('Write token required — enter it in the auth panel');
-  let _base = CF_WORKER_URL.trim().replace(/\/+$/, '');
-  if (!_base.startsWith('http://') && !_base.startsWith('https://')) _base = 'https://' + _base;
-  const res = await fetch(`${_base}/${filename}`, {
+
+  // Optimistic locking: fetch current version from Worker and compare
+  // before writing, to detect if someone else saved since we loaded
+  try {
+    const current = await fetch(`${_workerBase()}/${filename}`, { cache: 'no-store' });
+    if (current.ok) {
+      const currentData = await current.json();
+      const currentVersion = typeof currentData._v === 'number' ? currentData._v : 0;
+      const loadedVersion = typeof _loadedVersions[filename] === 'number' ? _loadedVersions[filename] : 0;
+      if (currentVersion > loadedVersion) {
+        throw new Error(`CONFLICT:${filename}`);
+      }
+    }
+  } catch(e) {
+    if (e.message.startsWith('CONFLICT:')) throw e;
+    // If the version check fetch fails, proceed anyway (Worker may not have file yet)
+  }
+
+  // Increment version before saving
+  const loadedV = typeof _loadedVersions[filename] === 'number' ? _loadedVersions[filename] : 0;
+  const nextV = loadedV + 1;
+  const dataWithVersion = { ...data, _v: nextV };
+
+  const res = await fetch(`${_workerBase()}/${filename}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', 'X-Token': writeToken },
-    body: JSON.stringify(data, null, 2),
+    body: JSON.stringify(dataWithVersion, null, 2),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(`Worker save failed for ${filename}: ${err.error || res.status}`);
   }
-  // Reload local state immediately — no CDN delay with Worker
+
+  // Update our local version to what we just wrote
+  _loadedVersions[filename] = nextV;
+
+  // Reload local state immediately
   if (filename === 'loot-glossary.json') await loadLootGlossaryFromRepo();
   else if (filename === 'roster.json')   await loadRosterFromRepo();
   else if (filename === 'set-bonuses.json') await loadSetBonusesFromRepo();
   else if (filename === 'gear-item-ids.json') await loadGearItemIdsFromRepo();
   else if (filename === 'bis-data.json') await loadBisDataFromRepo();
   else if (filename === 'attendance.json') { /* handled by caller */ }
+  else if (filename === 'loot-distribution.json') await loadLootDistributionFromRepo();
+}
+
+// ── Conflict error handler ───────────────────────────────────────
+function handleSaveError(e, filename) {
+  if (e.message && e.message.startsWith('CONFLICT:')) {
+    const file = e.message.split(':')[1] || filename || 'data';
+    addError(
+      `Save conflict on ${file}`,
+      'Another user saved changes after you loaded this page. ' +
+      'Your changes were NOT saved. Please refresh the page to get the latest data, then re-apply your changes.'
+    );
+  } else {
+    addError(`Save failed${filename ? ' (' + filename + ')' : ''}`, e.message || String(e));
+  }
 }
 
 // Refresh slot options when phase changes without resetting spec
