@@ -3475,8 +3475,8 @@ function initWclIfSaved() {
 function saveGithubToken() {
   const token = document.getElementById('claToken').value.trim();
   if (!token) return;
-  writeToken = token;
-  try { localStorage.setItem('writeToken', token); } catch(e) {}
+  writeToken = token.trim();
+  try { localStorage.setItem('writeToken', token.trim()); } catch(e) {}
   document.getElementById('claToken').value = '';
   updateAuthState();
 }
@@ -5619,6 +5619,8 @@ async function migrateFromGitHub() {
   const btn = document.getElementById('migrateBtn');
   if (!CF_WORKER_URL) { alert('CF_WORKER_URL not set in source.'); return; }
   if (!writeToken) { alert('Write token required.'); return; }
+  // Diagnostic: confirm token length and value to catch whitespace/copy-paste issues
+  console.log(`[migrate] writeToken length=${writeToken.length} value="${writeToken}"`);
   const files = [
     'loot-glossary.json', 'roster.json', 'attendance.json',
     'bis-data.json', 'gear-item-ids.json', 'set-bonuses.json',
