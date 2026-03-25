@@ -1583,14 +1583,12 @@ function setGrouping(mode) {
   const isLoot = mode === 'loot';
   const isCla  = mode === 'cla';
   const isBis  = mode === 'bis';
-  const isRoster  = mode === 'roster';
   const isGlossary = mode === 'glossary';
   const isAttendance = mode === 'attendance';
   const isLootLog = mode === 'lootlog';
   document.getElementById('lootPanel').style.display   = isLoot   ? 'block' : 'none';
   document.getElementById('claPanel').style.display    = isCla    ? 'block' : 'none';
   document.getElementById('bisPanel').style.display    = isBis    ? 'block' : 'none';
-  document.getElementById('rosterPanel').style.display   = isRoster   ? 'block' : 'none';
   document.getElementById('glossaryPanel').style.display   = isGlossary   ? 'block' : 'none';
   document.getElementById('attendancePanel').style.display = isAttendance ? 'block' : 'none';
   document.getElementById('lootlogPanel').style.display    = isLootLog    ? 'block' : 'none';
