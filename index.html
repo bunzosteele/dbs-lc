@@ -1567,6 +1567,7 @@ document.addEventListener('click', (e) => {
 
 function setGrouping(mode) {
   groupingMode = mode;
+  _urlSetParam('tab', mode === 'role' ? '' : mode); // 'role' is default, no param needed
   document.querySelectorAll('.group-btn').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
   // Sync dropdown trigger button active state
   _navDropdowns.forEach(did => {
@@ -4318,12 +4319,75 @@ async function loadGearItemIdsFromRepo() {
   boot();
 })();
 
+
+// ── URL state (query params) ──────────────────────────────────────
+// Persists tab + loot dropdown selections across refreshes
+// Params: tab, raid, boss, item
+
+function _urlSetParam(key, value) {
+  const url = new URL(window.location);
+  if (value) {
+    url.searchParams.set(key, value);
+  } else {
+    url.searchParams.delete(key);
+  }
+  window.history.replaceState({}, '', url);
+}
+
+function _urlGetParam(key) {
+  return new URL(window.location).searchParams.get(key) || '';
+}
+
+function _urlClearLootParams() {
+  const url = new URL(window.location);
+  url.searchParams.delete('raid');
+  url.searchParams.delete('boss');
+  url.searchParams.delete('item');
+  window.history.replaceState({}, '', url);
+}
+
+function _urlRestoreState() {
+  const tab  = _urlGetParam('tab');
+  const raid = _urlGetParam('raid');
+  const boss = _urlGetParam('boss');
+  const item = _urlGetParam('item');
+
+  if (tab) setGrouping(tab);
+
+  if (tab === 'loot' && raid) {
+    // Restore loot dropdown selections after a short delay to ensure glossary is ready
+    setTimeout(() => {
+      const raidSel = document.getElementById('lootRaid');
+      if (!raidSel) return;
+      raidSel.value = raid;
+      onRaidChange(true); // populate boss dropdown
+      if (boss) {
+        setTimeout(() => {
+          const bossSel = document.getElementById('lootBoss');
+          if (bossSel) {
+            bossSel.value = boss;
+            onBossChange(); // populate item dropdown
+            if (item) {
+              setTimeout(() => {
+                const itemId = getItemId(item);
+                const iconName = itemId ? itemIcons[itemId] : null;
+                selectItem(item, itemId, iconName);
+              }, 50);
+            }
+          }
+        }, 50);
+      }
+    }, 100);
+  }
+}
+
 function boot() {
 loadClaSheetsFromRepo().then(async () => {
   await Promise.all([loadGearItemIdsFromRepo(), loadBisDataFromRepo(), loadRosterFromRepo(), loadLootGlossaryFromRepo(), loadSetBonusesFromRepo(), loadAttendanceFromRepo(), loadLootDistributionFromRepo()]);
   // Handle PKCE callback first (page may have been redirected back from WarcraftLogs)
   const wasCallback = await handleWclCallback();
   await fetchData();
+  _urlRestoreState();
   // Always try to fetch WCL after data is loaded (callback or existing token)
   const token = await getWclToken();
   if (token) {
@@ -6663,6 +6727,8 @@ function renderLootDropdowns() {
 
 function onRaidChange(preserveBoss = false) {
   const raid = document.getElementById('lootRaid').value;
+  _urlSetParam('raid', raid);
+  if (!raid) { _urlSetParam('boss', ''); _urlSetParam('item', ''); }
   const bossSel = document.getElementById('lootBoss');
   bossSel.innerHTML = '<option value="">— Select Boss —</option>';
   selectedItem = '';
@@ -6691,6 +6757,8 @@ let selectedItem = '';
 function onBossChange() {
   const raid = document.getElementById('lootRaid').value;
   const boss = document.getElementById('lootBoss').value;
+  _urlSetParam('boss', boss);
+  if (!boss) _urlSetParam('item', '');
   const display = document.getElementById('lootItemDisplay');
   const dropdown = document.getElementById('lootItemDropdown');
   const text = document.getElementById('lootItemText');
@@ -6723,6 +6791,7 @@ function toggleItemDropdown() {
 
 function selectItem(item, id, iconName) {
   selectedItem = item;
+  _urlSetParam('item', item);
   const display = document.getElementById('lootItemDisplay');
   const text = document.getElementById('lootItemText');
   const dropdown = document.getElementById('lootItemDropdown');
