@@ -9,7 +9,7 @@ A TBC Classic loot council dashboard that tracks raid attendance, consumable usa
 - A GitHub account (for hosting via GitHub Pages)
 - A Cloudflare account (free tier is sufficient)
 - A Google account (for the Apps Script proxy)
-- Your guild's CLA (Combat Log Analystics) Google Sheet IDs
+- Your guild's CLA (Combat Log Analytics) Google Sheet IDs
 - *(Optional)* A WarcraftLogs account with API access
 
 ---
@@ -26,29 +26,31 @@ A TBC Classic loot council dashboard that tracks raid attendance, consumable usa
 
 ## 2. Set Up the Google Apps Script Proxy
 
-The Apps Script acts as a server-side proxy that:
-- Fetches your CLA Google Sheets (bypassing browser CORS restrictions)
-- Handles WarcraftLogs OAuth token exchange (if WCL is enabled)
-- Looks up item icons by Wowhead item ID
-
-### Main Proxy Script (`apps_script`)
+The dashboard uses up to three Google Apps Script web apps as server-side proxies. Each is deployed the same way:
 
 1. Go to [script.google.com](https://script.google.com) and click **New project**
-2. Replace the default code with the contents of `apps-script/proxy.gs` from the repo
+2. Paste in the script contents (see below)
 3. Click **Deploy → New deployment**
-4. Type: **Web app**
-5. Execute as: **Me**
-6. Who has access: **Anyone**
-7. Click **Deploy** and copy the URL — this is your `apps_script` value
+4. Type: **Web app** · Execute as: **Me** · Who has access: **Anyone**
+5. Click **Deploy** and copy the URL
 
-### Icon Lookup Script (`icon_script`)
+### Main Proxy Script (`apps_script`) — required
 
-1. Create a second new Apps Script project
-2. Replace the default code with the contents of `apps-script/icon-lookup.gs` from the repo
-3. Deploy the same way (Web app, Execute as Me, Anyone)
-4. Copy the URL — this is your `icon_script` value
+Paste the contents of `apps-script/proxy.gs`. This handles CLA Google Sheet fetches and Wowhead item lookups. It is **safe to share** — the repository's own hosted URL can be reused by multiple guilds if you prefer not to deploy your own. The script is stateless, involves no credentials, and consumes negligible quota (a few milliseconds per sheet fetch).
 
-> **Note:** `icon_script` is optional. It only fires when an item appears in a CLA sheet that isn't already in `gear-item-ids.json`. If you fully seed your own item map, it's never called.
+Copy the deployed URL — this is your `apps_script` value in `config.json`.
+
+### WCL Proxy Script (`wcl_apps_script`) — required only if `enable_wcl: true`
+
+Paste the contents of `apps-script/wcl-proxy.gs`. This handles WarcraftLogs OAuth token exchange and GraphQL queries. **Each guild must deploy their own copy** — this script consumes quota proportional to your roster size each time WCL data is refreshed, and handles OAuth tokens that should not be proxied through another guild's Google account.
+
+Copy the deployed URL — this is your `wcl_apps_script` value in `config.json`.
+
+### Icon Lookup Script (`icon_script`) — optional
+
+Paste the contents of `apps-script/icon-lookup.gs`. Only called when an item appears in a CLA sheet that isn't already in `gear-item-ids.json`. If you fully seed your own item map, it is never invoked.
+
+Copy the deployed URL — this is your `icon_script` value in `config.json`.
 
 ---
 
@@ -109,6 +111,7 @@ Edit `config.json` in the root of your repo:
 If you want WarcraftLogs integration (see Section 6), also add:
 ```json
   "enable_wcl": true,
+  "wcl_apps_script": "https://script.google.com/macros/s/YOUR_WCL_SCRIPT_ID/exec",
   "wcl_client_id": "your-wcl-oauth-client-id",
   "wcl_realm": "your-realm-slug"
 ```
@@ -123,7 +126,7 @@ The dashboard reads all its data from Cloudflare KV. You need to push the initia
 
 ### Prepare the JSON files
 
-The following files in the repo root need to be populated before seeding:
+The following files in the `/data` subdirectory need to be populated before seeding:
 
 | File | What it contains | How to populate |
 |---|---|---|
@@ -179,9 +182,9 @@ Skip this section and set `"enable_wcl": false` in `config.json` if you don't wa
      *(Must match exactly — no trailing slash issues)*
 4. Click **Create** and copy the **Client ID**
 
-### Configure the Apps Script for WCL
+### Deploy Your WCL Proxy Script
 
-The main `apps_script` proxy handles the WCL OAuth token exchange. It needs no additional configuration — it passes tokens through transparently.
+Follow the Apps Script deployment steps from Section 2, using the contents of `apps-script/wcl-proxy.gs`. Add the deployed URL as `wcl_apps_script` in `config.json`. This must be your own deployment — do not reuse another guild's WCL proxy.
 
 ### Add WCL config to `config.json`
 
@@ -305,4 +308,4 @@ Google Apps Script (proxy)
     ↕ WarcraftLogs API (optional)
 ```
 
-All persistent data lives in Cloudflare KV. The GitHub repo contains only the application code and the initial seed files — after `migrateFromGitHub()` is run once, KV is the source of truth and the repo files are only used for redeployment.
+All persistent data lives in Cloudflare KV. The GitHub repo contains only the application code and the initial seed files in `/data/` — after `migrateFromGitHub()` is run once, KV is the source of truth and the repo files are only used for redeployment.
