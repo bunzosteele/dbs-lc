@@ -4349,6 +4349,12 @@ function setBonusAddCondition() {
   if (!val || _sbPendingConditions.includes(val)) return;
   _sbPendingConditions.push(val);
   _sbRenderPendingConditions();
+  // After adding a Role condition, switch type dropdown to Class
+  const typeEl = document.getElementById('sbPrioType');
+  if (typeEl && typeEl.value === 'role') {
+    typeEl.value = 'class';
+    setBonusUpdateTargetOpts();
+  }
 }
 
 function _sbRenderPendingConditions() {
