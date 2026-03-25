@@ -15,7 +15,7 @@
  *   Who has access: Anyone
  */
 
-function doGet(e) {
+function handleWcl(e) {
   const params = e.parameter;
   const action = params.action;
 
