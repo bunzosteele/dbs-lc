@@ -9,7 +9,7 @@ A TBC Classic loot council dashboard that tracks raid attendance, consumable usa
 - A GitHub account (for hosting via GitHub Pages)
 - A Cloudflare account (free tier is sufficient)
 - A Google account (for the Apps Script proxy)
-- Your guild's CLA (Combat Log Analyser) Google Sheet IDs
+- Your guild's CLA (Combat Log Analystics) Google Sheet IDs
 - *(Optional)* A WarcraftLogs account with API access
 
 ---
