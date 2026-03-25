@@ -4217,18 +4217,59 @@ function renderLootLogRaidList() {
     const expanded = _lootLogExpanded.has(raid.date);
     const items = raid.items || [];
 
-    // Collect item icons for the collapsed row preview
-    const iconHtml = items.slice(0, 20).map(entry => {
+    // Build item -> {raid, boss, bossIdx, raidIdx} lookup from glossary
+    const _raidOrder = Object.keys(lootGlossary.raids || {});
+    const _itemLocation = {};
+    _raidOrder.forEach((raidName, raidIdx) => {
+      const bosses = Object.keys(lootGlossary.raids[raidName] || {});
+      bosses.forEach((bossName, bossIdx) => {
+        for (const entry of lootGlossary.raids[raidName][bossName]) {
+          const key = entry.item.toLowerCase();
+          if (!_itemLocation[key]) {
+            _itemLocation[key] = { raidName, bossName, raidIdx, bossIdx };
+          }
+        }
+      });
+    });
+
+    // Sort items by raid → boss order, then group for rendering
+    const _sorted = [...items].sort((a, b) => {
+      const la = _itemLocation[a.item.toLowerCase()] || { raidIdx: 99, bossIdx: 99 };
+      const lb = _itemLocation[b.item.toLowerCase()] || { raidIdx: 99, bossIdx: 99 };
+      if (la.raidIdx !== lb.raidIdx) return la.raidIdx - lb.raidIdx;
+      return la.bossIdx - lb.bossIdx;
+    });
+
+    // Build icon HTML grouped by raid/boss with visual separators
+    let iconHtml = '';
+    let _lastRaid = null, _lastBoss = null;
+    for (const entry of _sorted) {
       const id = getItemId(entry.item);
-      if (!id || !itemIcons[id]) return '';
-      return `<img src="https://wow.zamimg.com/images/wow/icons/small/${itemIcons[id]}.jpg"
+      if (!id || !itemIcons[id]) continue;
+      const loc = _itemLocation[entry.item.toLowerCase()];
+      const thisRaid = loc?.raidName || null;
+      const thisBoss = loc?.bossName || null;
+
+      // Raid divider — subtle vertical line
+      if (thisRaid && thisRaid !== _lastRaid && _lastRaid !== null) {
+        iconHtml += `<span style="width:1px;height:20px;background:var(--border);margin:0 4px;flex-shrink:0;"></span>`;
+      }
+      // Boss gap — small space
+      if (thisBoss && thisBoss !== _lastBoss && _lastBoss !== null && thisRaid === _lastRaid) {
+        iconHtml += `<span style="width:4px;flex-shrink:0;"></span>`;
+      }
+
+      iconHtml += `<img src="https://wow.zamimg.com/images/wow/icons/small/${itemIcons[id]}.jpg"
         style="width:20px;height:20px;border:1px solid #333;border-radius:2px;flex-shrink:0;"
         title="${entry.item} → ${entry.recipient}" />`;
-    }).join('');
-    const moreCount = items.length > 20 ? `<span style="font-size:11px;color:var(--text-dim);margin-left:4px;">+${items.length - 20} more</span>` : '';
+      _lastRaid = thisRaid;
+      _lastBoss = thisBoss;
+    }
+    const _shown = _sorted.filter(e => { const id = getItemId(e.item); return id && itemIcons[id]; }).length;
+    const moreCount = _shown < items.length ? `<span style="font-size:11px;color:var(--text-dim);margin-left:4px;">+${items.length - _shown} more</span>` : '';
 
     const raidDiv = document.createElement('div');
-    raidDiv.style.cssText = 'border:1px solid var(--border);border-radius:6px;margin-bottom:8px;overflow:hidden;';
+    raidDiv.style.cssText = 'border:1px solid var(--border);border-radius:6px;margin-bottom:8px;';
 
     // Header row
     const header = document.createElement('div');
@@ -4245,12 +4286,12 @@ function renderLootLogRaidList() {
     // Expanded content
     if (expanded) {
       const body = document.createElement('div');
-      body.style.cssText = 'padding:12px 14px;border-top:1px solid var(--border);';
+      body.style.cssText = 'padding:12px 14px;border-top:1px solid var(--border);overflow:visible;';
 
       // Add item form
       body.innerHTML = `
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:14px;flex-wrap:wrap;">
-          <div id="lootlogItemDropdown_${raid.date}" style="position:relative;min-width:220px;"></div>
+          <div id="lootlogItemDropdown_${raid.date}" style="position:relative;min-width:320px;"></div>
           <div id="lootlogRecipientDropdown_${raid.date}" style="position:relative;min-width:160px;"></div>
           <button id="lootlogAddItemBtn_${raid.date}" class="gloss-btn-saveable"
             onclick="lootLogAddItem('${raid.date}')"
@@ -4327,7 +4368,7 @@ function lootLogInitRecipientDropdown(dateStr) {
 
 function lootLogBuildAutocomplete({ container, inputId, placeholder, items, renderOption, onSelect, onInput }) {
   const inputStyle = 'background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;width:100%;box-sizing:border-box;';
-  const dropStyle = 'position:absolute;top:100%;left:0;right:0;background:var(--bg2);border:1px solid var(--border);border-top:none;border-radius:0 0 4px 4px;max-height:220px;overflow-y:auto;z-index:100;display:none;';
+  const dropStyle = 'position:absolute;top:100%;left:0;min-width:100%;background:var(--bg2);border:1px solid var(--border);border-top:none;border-radius:0 0 4px 4px;max-height:220px;overflow-y:auto;z-index:9999;display:none;white-space:nowrap;';
 
   container.innerHTML = `<input id="${inputId}" placeholder="${placeholder}" autocomplete="off" style="${inputStyle}" /><div id="${inputId}_drop" style="${dropStyle}"></div>`;
 
