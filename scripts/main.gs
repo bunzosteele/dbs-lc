@@ -2,7 +2,10 @@ function doGet(e) {
   const action = e.parameter.action;
   
   if (action === 'wclAuth' || action === 'wclQuery') {
-    return handleWcl(e); // defined in wcl.gs
+    return handleWcl(e);
   }
-  return handleProxy(e); // defined in proxy.gs
+  if (e.parameter.itemId) {
+    return handleIconLookup(e);
+  }
+  return handleProxy(e);
 }
