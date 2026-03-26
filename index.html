@@ -2447,9 +2447,10 @@ function buildLootByPlayerFromDistribution() {
       if (!result[key]) result[key] = [];
       const itemId = getItemId(entry.item);
       const value = itemId ? getItemLootValue(entry.recipient, itemId) : 0;
-      result[key].push({ name: entry.item, value });
+      result[key].push({ name: entry.item, value, date: raid.date, label: raid.label });
     }
   }
+  // Reverse so most recent appears first
   for (const key in result) result[key].reverse();
   return result;
 }
@@ -3769,7 +3770,7 @@ function toggleLoot(td, playerName) {
     html += `<em class="no-loot">No loot recorded</em>`;
   } else {
     const playerObj = lastRenderData.roles.flatMap(r => r.players).find(p => normalizeName(p.name) === key);
-    html += `<div class="loot-list">${items.map(({name, value}) => {
+    html += `<div class="loot-list">${items.map(({name, value, date, label}) => {
       const itemId = getItemId(name, playerName);
       const epv = itemId ? getAvgRewardEpv(itemId) : null;
       const formulaEpv = itemId ? getWeightedItemEpv(playerName, itemId) : 0;
@@ -3784,8 +3785,8 @@ function toggleLoot(td, playerName) {
       const _nLabel = _isToken ? `${effListCount} rewards (capped)` : `${effListCount} players`;
       const _epvLabel = _isToken ? 'avgEPV' : 'maxEPV';
       const epvTip = isOverridden
-        ? ` title="Loot Value: ${lootValue.toFixed(1)} (overridden)"`
-        : ` title="${_epvLabel}: ${epv ? epv.toFixed(1) : '0'} × ${logMult.toFixed(2)} (log ${_nLabel}) × avg^1.5(${rankAvg.toFixed(3)}) × best(${rankBest.toFixed(2)})^0.5${_is2h ? ' × 0.5 (2H)' : ''} = ${formulaEpv.toFixed(1)}"`;
+        ? ` title="${label ? label + ' — ' : ''}Loot Value: ${lootValue.toFixed(1)} (overridden)"`
+        : ` title="${label ? label + ' — ' : ''} ${_epvLabel}: ${epv ? epv.toFixed(1) : '0'} × ${logMult.toFixed(2)} (log ${_nLabel}) × avg^1.5(${rankAvg.toFixed(3)}) × best(${rankBest.toFixed(2)})^0.5${_is2h ? ' × 0.5 (2H)' : ''} = ${formulaEpv.toFixed(1)}"`;
       return `<span class="loot-item" style="border-color:${col};background:${col}18;"${epvTip}>${itemLink(name, name)}</span>`;
     }).join('')}</div>`;
   }
