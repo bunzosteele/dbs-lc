@@ -1367,7 +1367,10 @@
   <div id="claPanel" style="display:none;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
       <span style="font-family:'Cinzel',serif;font-size:13px;letter-spacing:0.15em;color:var(--gold);">⚔ CLA Sheets</span>
-      <span id="claCount" style="font-size:12px;color:var(--text-dim);"></span>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span id="claCount" style="font-size:12px;color:var(--text-dim);"></span>
+        <button id="claReparseBtn" class="btn write-gated" onclick="reparseAllClaData()" title="Re-fetch all CLA sheets, re-parse, and cache for faster future loads" style="font-size:11px;padding:3px 10px;">Re-parse CLAs</button>
+      </div>
     </div>
     <div id="claList"></div>
     <div class="cla-io-row">
@@ -1483,6 +1486,7 @@ let itemMap = {}; // normalized item name -> { id, name }
 let itemValueMap = {}; // normalized item name -> loot value (number)
 let itemIcons = {}; // item id -> icon name
 let claSheets = [];
+let _claStoredParsed = {}; // parsed CLA data loaded from KV, keyed by label
 let claDataByPlayer = {};
 let claPlayersByLabel = {}; // label -> Set of normalised player keys
 let canonicalNames = {}; // normalized key -> exact name with special chars from CLA
@@ -2796,10 +2800,11 @@ async function saveClaSheetsToGitHub() {
   _githubSaveTimer = null;
   try {
     const _wbase = (u => u.startsWith('http') ? u : 'https://' + u)(CF_WORKER_URL.trim().replace(/\/+$/, ''));
+    const claPayload = { sheets: claSheets, parsed: _claStoredParsed };
     const res = await fetch(`${_wbase}/cla-sheets.json`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', 'X-Token': writeToken },
-      body: JSON.stringify(claSheets, null, 2),
+      body: JSON.stringify(claPayload, null, 2),
     });
     if (res.ok) {
       setHint('✓ Saved!', 'success');
@@ -2930,6 +2935,8 @@ async function fetchData() {
     // Build lootByPlayer from loot-distribution.json
     lootByPlayer = buildLootByPlayerFromDistribution();
 
+    // Store parsed CLA data for future cached loads
+    _storeParsedClaData();
     // Build attendance from CLA data
     rebuildAttendanceFromCla();
     if (groupingMode === 'attendance') renderAttendancePanel();
@@ -4173,6 +4180,159 @@ function removeCla(i) {
   saveClaSheetsToGitHub();
 }
 
+
+// Apply stored parsed CLA data to in-memory globals
+function _applyClaStoredParsed() {
+  for (const [label, pd] of Object.entries(_claStoredParsed)) {
+    // sheetDate
+    if (pd.sheetDate) claSheetDates[label] = pd.sheetDate;
+
+    // claPresence
+    if (pd.claPresence) {
+      if (!claPlayersByLabel[label]) claPlayersByLabel[label] = new Set();
+      for (const key of (pd.claPresence || [])) {
+        claPlayersByLabel[label].add(key);
+        if (!canonicalNames[key]) {
+          const sheet = claSheets.find(s => s.label === label);
+          // canonical name stored separately
+        }
+      }
+    }
+
+    // canonicalNames
+    if (pd.canonicalNames) {
+      for (const [k, v] of Object.entries(pd.canonicalNames)) canonicalNames[k] = v;
+    }
+
+    // gearIssues
+    if (pd.gearIssues) {
+      for (const [key, data] of Object.entries(pd.gearIssues)) {
+        if (!claDataByPlayer[key]) claDataByPlayer[key] = { gearIssues: [], buffConsumables: [] };
+        claDataByPlayer[key].gearIssues.push(data);
+        // Apply recency logic for latestGearIssuesByPlayer
+        const existingLabel = latestGearIssuesByPlayer[key]?.label;
+        const existingDate = existingLabel ? (claSheetDates[existingLabel] || null) : null;
+        const thisDate = pd.sheetDate || null;
+        let isNewer;
+        if (thisDate && existingDate) { isNewer = thisDate >= existingDate; }
+        else {
+          const si = claSheets.findIndex(s => s.label === label);
+          const ei = existingLabel ? claSheets.findIndex(s => s.label === existingLabel) : -1;
+          isNewer = si >= ei;
+        }
+        if (isNewer) latestGearIssuesByPlayer[key] = { label, issues: data.issues };
+      }
+    }
+
+    // buffScores
+    if (pd.buffScores) {
+      for (const [key, scores] of Object.entries(pd.buffScores)) {
+        if (!claDataByPlayer[key]) claDataByPlayer[key] = { gearIssues: [], buffConsumables: [] };
+        for (const [dateStr, score] of Object.entries(scores)) {
+          if (!buffScoreByPlayerDate[key]) buffScoreByPlayerDate[key] = {};
+          buffScoreByPlayerDate[key][dateStr] = score;
+        }
+      }
+    }
+
+    // gearListing
+    if (pd.gearListing) {
+      for (const [key, slots] of Object.entries(pd.gearListing)) {
+        const existingLabel = gearListingByPlayer[key]?.label;
+        const existingDate = existingLabel ? (claSheetDates[existingLabel] || null) : null;
+        const thisDate = pd.sheetDate || null;
+        let isNewer;
+        if (thisDate && existingDate) { isNewer = thisDate >= existingDate; }
+        else {
+          const si = claSheets.findIndex(s => s.label === label);
+          const ei = existingLabel ? claSheets.findIndex(s => s.label === existingLabel) : -1;
+          isNewer = si >= ei;
+        }
+        if (isNewer) gearListingByPlayer[key] = { label, slots };
+      }
+    }
+  }
+  console.log('CLA cache applied:', Object.keys(claDataByPlayer).length, 'players,',
+    Object.keys(gearListingByPlayer).length, 'gear listings,',
+    Object.keys(buffScoreByPlayerDate).length, 'buff score players');
+}
+
+// Re-fetch all CLA sheets, re-parse, store in _claStoredParsed, and save
+async function reparseAllClaData() {
+  const btn = document.getElementById('claReparseBtn');
+  if (btn) { btn.textContent = 'Re-parsing…'; btn.disabled = true; }
+  try {
+    // Force full re-fetch by temporarily clearing cache
+    const backup = _claStoredParsed;
+    _claStoredParsed = {};
+    await fetchAllClaData();
+    // Store parsed results back into _claStoredParsed
+    _storeParsedClaData();
+    await saveClaSheetsToGitHub();
+    if (btn) { btn.textContent = '✓ Done'; setTimeout(() => { btn.textContent = 'Re-parse CLAs'; btn.disabled = false; }, 2000); }
+    setHint('CLA data re-parsed and cached — future loads will be instant.', 'success');
+  } catch(e) {
+    _claStoredParsed = backup;
+    if (btn) { btn.textContent = 'Re-parse CLAs'; btn.disabled = false; }
+    setHint('Re-parse failed: ' + e.message, 'error');
+  }
+}
+
+// Snapshot current in-memory parsed state into _claStoredParsed
+function _storeParsedClaData() {
+  _claStoredParsed = {};
+  for (const sheet of claSheets) {
+    const label = sheet.label;
+    const sheetDate = claSheetDates[label] || null;
+
+    // Gear issues per player for this label
+    const gearIssues = {};
+    for (const [key, data] of Object.entries(claDataByPlayer)) {
+      const entry = data.gearIssues.find(gi => gi.label === label);
+      if (entry) gearIssues[key] = entry;
+    }
+    // Also capture latestGearIssuesByPlayer for this label
+    const latestIssues = {};
+    for (const [key, data] of Object.entries(latestGearIssuesByPlayer)) {
+      if (data.label === label) latestIssues[key] = data;
+    }
+
+    // Buff scores per player for this label's date
+    const buffScores = {};
+    if (sheetDate) {
+      for (const [key, scores] of Object.entries(buffScoreByPlayerDate)) {
+        if (scores[sheetDate]) {
+          if (!buffScores[key]) buffScores[key] = {};
+          buffScores[key][sheetDate] = scores[sheetDate];
+        }
+      }
+    }
+
+    // Gear listing for this label
+    const gearListing = {};
+    for (const [key, data] of Object.entries(gearListingByPlayer)) {
+      if (data.label === label) gearListing[key] = data.slots;
+    }
+
+    // CLA presence
+    const claPresence = [...(claPlayersByLabel[label] || [])];
+
+    // Canonical names
+    const canonical = { ...canonicalNames };
+
+    _claStoredParsed[label] = {
+      sheetDate,
+      claPresence,
+      canonicalNames: canonical,
+      gearIssues,
+      latestIssues,
+      buffScores,
+      gearListing,
+    };
+  }
+  console.log('Stored parsed CLA data for', Object.keys(_claStoredParsed).length, 'sheets');
+}
+
 async function fetchAllClaData() {
   claDataByPlayer = {};
   claPlayersByLabel = {};
@@ -4181,6 +4341,14 @@ async function fetchAllClaData() {
   gearListingByPlayer = {};
   claSheetDates = {};
   canonicalNames = {};
+
+  // If all sheets have cached parsed data, use it instead of re-fetching
+  const allCached = claSheets.length > 0 && claSheets.every(s => _claStoredParsed[s.label]);
+  if (allCached) {
+    console.log('Loading CLA data from cache (' + claSheets.length + ' sheets)');
+    _applyClaStoredParsed();
+    return;
+  }
 
   // Fetch all CLA sheets in parallel, collecting raw results first
   const gearResults = [];        // { label, text }
@@ -4359,18 +4527,19 @@ if (typeof ENABLE_WCL === 'undefined' || ENABLE_WCL) initWclIfSaved();
 async function loadClaSheetsFromRepo() {
   try {
     let data;
-    try { data = await fetchFromWorker('cla-sheets.json'); } catch(e) { return; } // not yet saved, silently skip
-    if (!Array.isArray(data) || !data.length) return;
-    // Only use repo data if user has no locally saved sheets
+    try { data = await fetchFromWorker('cla-sheets.json'); } catch(e) { return; }
+    // Support both old format (array) and new format ({ sheets, parsed })
+    const sheets = Array.isArray(data) ? data : (data?.sheets || []);
+    const parsed = Array.isArray(data) ? null : (data?.parsed || null);
+    if (!sheets.length) return;
     if (!claSheets.length) {
-      claSheets = data;
+      claSheets = sheets;
+      if (parsed) _claStoredParsed = parsed;
       saveClaSheets();
       renderClaList();
-updateAuthState();
+      updateAuthState();
     }
-  } catch(e) {
-    // Not on GitHub Pages or file missing — ignore
-  }
+  } catch(e) {}
 }
 async function loadBisDataFromRepo() {
   try {
