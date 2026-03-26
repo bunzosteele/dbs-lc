@@ -2589,6 +2589,8 @@ async function handleWclCallback() {
 }
 
 let WCL_CLIENT_ID = 'a1577bef-44fb-4fb3-87f6-555c24400a38';
+let WCL_ZONE_ID = 1048;        // TBC Classic zone — override via config.json wcl_zone_id
+let WCL_GAME_SLUG = 'tbc-classic'; // WCL game version slug
 const WCL_REDIRECT_URI = 'https://bunzosteele.github.io/dbs-lc/';
 let WCL_REALM = 'dreamscythe';
 const WCL_AUTH_URL = 'https://www.warcraftlogs.com/oauth/authorize';
@@ -2709,8 +2711,8 @@ async function fetchWclAllStars(realm) {
         const metric = isHealer ? 'hps' : 'dps';
         const charQuery = `{
           characterData {
-            character(name: "${wclName}", serverSlug: "${realm}", serverRegion: "${WCL_REGION}") {
-              zoneRankings(metric: ${metric})
+            character(name: "${wclName}", serverSlug: "${realm}", serverRegion: "${WCL_REGION}", gameVersionSlug: "${WCL_GAME_SLUG}") {
+              zoneRankings(zoneID: ${WCL_ZONE_ID}, metric: ${metric})
             }
           }
         }`;
@@ -4591,6 +4593,8 @@ async function loadGearItemIdsFromRepo() {
     if (cfg.enable_wcl != null)  ENABLE_WCL           = !!cfg.enable_wcl;
     if (cfg.wcl_client_id)       WCL_CLIENT_ID        = cfg.wcl_client_id;
     if (cfg.wcl_realm)           WCL_REALM            = cfg.wcl_realm;
+    if (cfg.wcl_zone_id)         WCL_ZONE_ID          = cfg.wcl_zone_id;
+    if (cfg.wcl_game_slug)       WCL_GAME_SLUG        = cfg.wcl_game_slug;
     // Apply branding
     document.title = PAGE_TITLE;
     const h1 = document.querySelector('header h1');
