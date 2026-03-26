@@ -2558,7 +2558,8 @@ async function exchangeWclCode(code) {
   }));
   const rawUrl = APPS_SCRIPT + '?action=wclAuth&payload=' + encodeURIComponent(payload);
   try {
-    const text = await proxyFetch(rawUrl);
+    const res = await fetch(rawUrl);
+    const text = await res.text();
     let data;
     try { data = JSON.parse(text); } catch(e) { console.warn('Token parse error:', text); return null; }
     if (data.error) { console.warn('Token exchange error:', data); return null; }
@@ -2676,7 +2677,8 @@ async function wclFetch(url) {
 async function wclGraphQL(query, token) {
   const q = btoa(unescape(encodeURIComponent(query)));
   const rawUrl = APPS_SCRIPT + '?action=wclQuery&q=' + encodeURIComponent(q) + '&token=' + encodeURIComponent(token);
-  const text = await proxyFetch(rawUrl);
+  const res = await fetch(rawUrl);
+  const text = await res.text();
   if (text.trimStart().startsWith('<')) throw new Error('Proxy returned HTML — URL may be too long or request failed');
   return JSON.parse(text);
 }
