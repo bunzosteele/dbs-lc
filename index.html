@@ -2563,9 +2563,8 @@ async function exchangeWclCode(code) {
   }));
   const rawUrl = APPS_SCRIPT + '?action=wclAuth&payload=' + encodeURIComponent(payload);
   try {
-    // Apps Script handles OAuth server-side — call directly, no proxy
-    const res = await fetch(rawUrl);
-    const text = await res.text();
+    // Must go through corsproxy — Apps Script redirects through googleusercontent.com which has no CORS headers
+    const text = await appsScriptFetch(rawUrl);
     let data;
     try { data = JSON.parse(text); } catch(e) { console.warn('Token parse error:', text); return null; }
     if (data.error) { console.warn('Token exchange error:', data); return null; }
@@ -2685,9 +2684,8 @@ async function wclFetch(url) {
 async function wclGraphQL(query, token) {
   const q = btoa(unescape(encodeURIComponent(query)));
   const rawUrl = APPS_SCRIPT + '?action=wclQuery&q=' + encodeURIComponent(q) + '&token=' + encodeURIComponent(token);
-  // Apps Script handles the WCL call server-side and returns JSON directly — call it directly, no proxy
-  const res = await fetch(rawUrl);
-  const text = await res.text();
+  // Must go through corsproxy — Apps Script redirects through googleusercontent.com which has no CORS headers
+  const text = await appsScriptFetch(rawUrl);
   if (text.trimStart().startsWith('<')) throw new Error('Apps Script returned HTML — check deployment');
   return JSON.parse(text);
 }
