@@ -3,7 +3,7 @@
   "guild_subtitle": "Loot Council Summary",
   "page_title": "DBS LC",
   "cf_worker_url": "https://dbs-lc.steelead24.workers.dev",
-  "apps_script": "https://script.google.com/macros/s/AKfycbxtf271hX0ZT-wTUJE-mv_VS5m495d1yKdbG33PRzSUP01u22WttiUyAPw_gjIRNIY0/exec",
+  "apps_script": "https://script.google.com/macros/s/AKfycbwdfW4yXy6z9Fd39yJG5vCnuwgMenJXPAvVnHO4WnpDIWgsPrtBrgT81mpV4lQ9yZrE/exec",
   "enable_wcl": true,
   "wcl_client_id": "a1577bef-44fb-4fb3-87f6-555c24400a38",
   "wcl_realm": "dreamscythe",
