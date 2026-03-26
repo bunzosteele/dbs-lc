@@ -2558,8 +2558,7 @@ async function exchangeWclCode(code) {
   }));
   const rawUrl = APPS_SCRIPT + '?action=wclAuth&payload=' + encodeURIComponent(payload);
   try {
-    const res = await fetch(rawUrl);
-    const text = await res.text();
+    const text = await appsScriptFetch(rawUrl);
     let data;
     try { data = JSON.parse(text); } catch(e) { console.warn('Token parse error:', text); return null; }
     if (data.error) { console.warn('Token exchange error:', data); return null; }
@@ -2677,8 +2676,7 @@ async function wclFetch(url) {
 async function wclGraphQL(query, token) {
   const q = btoa(unescape(encodeURIComponent(query)));
   const rawUrl = APPS_SCRIPT + '?action=wclQuery&q=' + encodeURIComponent(q) + '&token=' + encodeURIComponent(token);
-  const res = await fetch(rawUrl);
-  const text = await res.text();
+  const text = await appsScriptFetch(rawUrl);
   if (text.trimStart().startsWith('<')) throw new Error('Proxy returned HTML — URL may be too long or request failed');
   return JSON.parse(text);
 }
@@ -2835,12 +2833,18 @@ async function proxyFetch(targetUrl) {
   throw new Error('All proxies failed for: ' + targetUrl);
 }
 
-async function fetchSheet(sheetId, gid) {
-  // Apps Script handles CORS directly — call it without a third-party proxy
-  const rawUrl = APPS_SCRIPT + '?sheetId=' + sheetId + '&gid=' + gid;
-  const res = await fetch(rawUrl);
+async function appsScriptFetch(url) {
+  // Apps Script redirects through script.googleusercontent.com
+  // corsproxy.io handles the redirect chain and returns CORS headers
+  const proxy = 'https://corsproxy.io/?' + encodeURIComponent(url);
+  const res = await fetch(proxy);
   if (!res.ok) throw new Error('Apps Script fetch failed: ' + res.status);
-  const text = await res.text();
+  return res.text();
+}
+
+async function fetchSheet(sheetId, gid) {
+  const rawUrl = APPS_SCRIPT + '?sheetId=' + sheetId + '&gid=' + gid;
+  const text = await appsScriptFetch(rawUrl);
   if (!text.trim() || !text.includes(',')) throw new Error('Response does not look like CSV');
   return text;
 }
@@ -4049,9 +4053,7 @@ async function lookupItemId(itemName) {
   try {
     // Call Apps Script directly (not via proxy) - it handles Wowhead fetch server-side
     const rawUrl = APPS_SCRIPT + '?action=itemLookup&name=' + encodeURIComponent(itemName);
-    const res = await fetch(rawUrl);
-    if (!res.ok) { console.warn('lookupItemId HTTP error:', res.status, itemName); return null; }
-    const text = await res.text();
+    const text = await appsScriptFetch(rawUrl);
     const data = JSON.parse(text);
     if (data.id) return { id: data.id, slot: data.slot || null };
     console.warn('No ID returned for:', itemName, data);
@@ -4107,8 +4109,7 @@ async function processGearListingForItemIds(sheetId, gearListingGid) {
           // Also fetch icon for new items
           let icon = null;
           try {
-            const iconRes = await fetch(`${APPS_SCRIPT}?itemId=${id}`);
-            const iconText = await iconRes.text();
+            const iconText = await appsScriptFetch(`${APPS_SCRIPT}?itemId=${id}`);
             const iconData = JSON.parse(iconText);
             if (iconData.icon) { icon = iconData.icon.toLowerCase(); itemIcons[id] = icon; }
           } catch(e) {}
