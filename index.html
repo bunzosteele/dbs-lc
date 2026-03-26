@@ -1987,6 +1987,13 @@ function formatAttendanceDate(date) {
   return date.toISOString().slice(0, 10);
 }
 
+function todayMST() {
+  // Return today's date as YYYY-MM-DD in MST (UTC-7, no DST adjustment)
+  const now = new Date();
+  const mst = new Date(now.getTime() - 7 * 60 * 60 * 1000);
+  return mst.toISOString().slice(0, 10);
+}
+
 function formatRaidLabel(date) {
   // "Mar 19" style
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -3681,7 +3688,7 @@ function lootLogAssignFromLootTab(playerName, itemName) {
   const latestRaid = sorted[0];
 
   // Check if latest raid date matches today
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayMST();
   if (latestRaid.date !== today) {
     const d = new Date(latestRaid.date + 'T12:00:00');
     const label = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
