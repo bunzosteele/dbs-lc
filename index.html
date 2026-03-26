@@ -4105,7 +4105,8 @@ async function processGearListingForItemIds(sheetId, gearListingGid) {
           // Also fetch icon for new items
           let icon = null;
           try {
-            const iconText = await proxyFetch(`${ICON_SCRIPT}?itemId=${id}`);
+            const iconRes = await fetch(`${APPS_SCRIPT}?itemId=${id}`);
+            const iconText = await iconRes.text();
             const iconData = JSON.parse(iconText);
             if (iconData.icon) { icon = iconData.icon.toLowerCase(); itemIcons[id] = icon; }
           } catch(e) {}
