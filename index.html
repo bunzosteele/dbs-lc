@@ -5124,7 +5124,13 @@ function renderAttendancePanel() {
             <tr style="border-bottom:2px solid var(--border);">
               <th style="text-align:left;padding:6px 12px;font-family:\'Cinzel\',serif;font-size:10px;letter-spacing:0.2em;color:var(--text-dim);white-space:nowrap;position:sticky;left:0;background:var(--bg);z-index:2;min-width:140px;">PLAYER</th>
 
-              ${raids.map(r => `<th style="${thStyle}"><div>${r.label}</div><div id="att-count-${r.date}" style="color:var(--gold-dim);font-size:11px;"></div></th>`).join('')}
+              ${raids.map(r => `<th style="${thStyle}cursor:pointer;" onclick="attendanceToggleDeleteRaid('${r.date}')" title="Click to delete raid">
+                <div style="display:flex;align-items:center;justify-content:center;gap:4px;">
+                  <span>${r.label}</span>
+                  <span id="att-del-${r.date}" style="display:none;color:var(--red);font-size:13px;font-weight:bold;" onclick="event.stopPropagation();attendanceDeleteRaid('${r.date}')" title="Delete this raid">✕</span>
+                </div>
+                <div id="att-count-${r.date}" style="color:var(--gold-dim);font-size:11px;"></div>
+              </th>`).join('')}
             </tr>
           </thead>
           <tbody id="attendanceTableBody"></tbody>
@@ -5272,6 +5278,33 @@ function renderAttendancePanel() {
   if (_attendanceDirty) {
     document.getElementById('attendanceSaveBtn')?.classList.add('gloss-btn-ready');
   }
+}
+
+
+function attendanceToggleDeleteRaid(dateStr) {
+  if (!writeToken) return;
+  // Hide all other X buttons first
+  document.querySelectorAll('[id^="att-del-"]').forEach(el => {
+    if (el.id !== 'att-del-' + dateStr) el.style.display = 'none';
+  });
+  const el = document.getElementById('att-del-' + dateStr);
+  if (el) el.style.display = el.style.display === 'none' ? 'inline' : 'none';
+}
+
+function attendanceDeleteRaid(dateStr) {
+  const raid = attendanceData.raids.find(r => r.date === dateStr);
+  if (!raid) return;
+  if (!confirm(`Delete raid "${raid.label}" (${dateStr}) and all its attendance data?\n\nThis cannot be undone.`)) return;
+  attendanceData.raids = attendanceData.raids.filter(r => r.date !== dateStr);
+  // Also clear any overrides for this date
+  for (const key of Object.keys(attendanceData.overrides || {})) {
+    if (attendanceData.overrides[key][dateStr] !== undefined) {
+      delete attendanceData.overrides[key][dateStr];
+    }
+  }
+  saveAttendanceToGitHub();
+  rebuildAttendanceFromCla();
+  renderAttendancePanel();
 }
 
 function attendanceAddRaid() {
