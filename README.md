@@ -6,17 +6,17 @@ A TBC Classic loot council dashboard that tracks raid attendance, consumable usa
 
 ## Prerequisites
 
-- A GitHub account (for hosting via GitHub Pages)
-- A Cloudflare account (free tier is sufficient)
-- A Google account (for the Apps Script proxy)
-- Your guild's CLA (Combat Log Analyser) Google Sheet IDs
+- FREE - A GitHub account (for hosting dashboard via GitHub Pages)
+- FREE - A Cloudflare account (for hosting data storage)
+- FREE - A Google account (for hosting apps scripts for data proxies)
+- FREE - Your guild's [CLAs](https://docs.google.com/spreadsheets/d/1TaL0zufIhSNhAVIfpsBXMT0JXL3ptpbA7vZnXCWOlBs/edit?gid=1843677088#gid=1843677088) Google Sheet IDs
 - *(Optional)* A WarcraftLogs account with API access
 
 ---
 
 ## 1. Fork the Repository
 
-1. Go to [github.com/bunzosteele/dbs-lc](https://github.com/bunzosteele/dbs-lc)
+1. Go to [github.com/bunzosteele/lc-dashboard](https://github.com/bunzosteele/lc-dashboard)
 2. Click **Fork** → choose your account
 3. In your fork, go to **Settings → Pages**
 4. Set **Source** to `Deploy from a branch`, branch `main`, folder `/ (root)`
@@ -26,38 +26,28 @@ A TBC Classic loot council dashboard that tracks raid attendance, consumable usa
 
 ## 2. Set Up the Google Apps Script Proxy
 
-The dashboard uses a single Google Apps Script project as a server-side proxy for CLA sheet fetches, Wowhead item lookups, and (optionally) WarcraftLogs OAuth and GraphQL. All functionality routes through one URL via an `action` parameter.
+The dashboard uses a single Google Apps Script project as a server-side proxy for CLA sheet fetches, Wowhead item lookups, and (optionally) WarcraftLogs OAuth and GraphQL.
 
 ### Create the Project
 
 1. Go to [script.google.com](https://script.google.com) and click **New project**
-2. The repo contains three script files in `apps-script/` — add each as a separate file within the same project:
+2. This repo contains four script files in `scripts/` — add each as a separate file within the same project:
    - `proxy.gs` — CLA sheet fetches and Wowhead item lookups
-   - `wcl-proxy.gs` — WarcraftLogs OAuth and GraphQL (only needed if `enable_wcl: true`)
+   - `wcl-proxy.gs` — WarcraftLogs OAuth and GraphQL (only needed if you plan to enable warcraftlogs integration)
    - `icon-lookup.gs` — item icon lookups by Wowhead ID
-3. Add a `main.gs` file that routes all requests to the correct handler:
-   ```javascript
-   function doGet(e) {
-     const action = e.parameter.action;
-     if (action === 'wclAuth' || action === 'wclQuery') return handleWcl(e);
-     if (action === 'iconLookup') return handleIconLookup(e);
-     return handleProxy(e);
-   }
-   ```
-4. Click **Deploy → New deployment**
-5. Type: **Web app** · Execute as: **Me** · Who has access: **Anyone**
-6. Click **Deploy** and copy the URL — this is your `apps_script` value in `config.json`
-
-> **Note for other guilds:** The sheet fetch and icon lookup portions of this script are safe to share — they are stateless and consume negligible quota. The WCL portions consume quota proportional to roster size and refresh frequency. Each guild should deploy their own copy if using WCL.
+   - `main.gs` — file that routes all requests to the correct handler
+3. Click **Deploy → New deployment**
+4. Type: **Web app** · Execute as: **Me** · Who has access: **Anyone**
+5. Click **Deploy** and copy the URL and set this as your `apps_script` value in `config.json`
 
 ---
 
-## 3. Set Up Cloudflare Worker + KV
+## 3. Set Up Cloudflare KV
 
 ### Create the KV Namespace
 
-1. Log in to [dash.cloudflare.com](https://dash.cloudflare.com)
-2. Go to **Workers & Pages → KV**
+1. Log in to [dash.cloudflare.com](https://dash.cloudflare.com), making a new account is free.
+2. Go to **Storage & databases → Workers KV**
 3. Click **Create a namespace**, name it anything (e.g. `LC_DATA`)
 4. Note the namespace ID
 
@@ -98,18 +88,17 @@ Edit `config.json` in the root of your repo:
 {
   "guild_name": "Your Guild Name",
   "guild_subtitle": "Loot Council Summary",
-  "page_title": "Your LC",
+  "page_title": "Your Guild Name",
   "cf_worker_url": "https://your-worker.your-subdomain.workers.dev",
   "apps_script": "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec",
   "enable_wcl": false
 }
 ```
 
-If you want WarcraftLogs integration (see Section 6), also add:
+If you want WarcraftLogs integration (see Section 6), change "enable_wcl" to true and add:
 ```json
-  "enable_wcl": true,
   "wcl_client_id": "your-wcl-oauth-client-id",
-  "wcl_realm": "your-realm-slug"
+  "wcl_realm": "your-realm-name"
 ```
 
 Commit and push — GitHub Pages will redeploy automatically.
@@ -120,26 +109,9 @@ Commit and push — GitHub Pages will redeploy automatically.
 
 The dashboard reads all its data from Cloudflare KV. You need to push the initial JSON files from your repo into KV once.
 
-### Prepare the JSON files
+### Creating initial data
 
-The following files in the `/data` subdirectory need to be populated before seeding:
-
-| File | What it contains | How to populate |
-|---|---|---|
-| `roster.json` | Player names, roles, classes | Edit manually or via the Roster tab |
-| `loot-glossary.json` | Raids, bosses, items, priorities | Edit via the Item Glossary tab |
-| `bis-data.json` | BiS EPV data per spec/slot | Edit via the BiS Lists tab |
-| `attendance.json` | Raid dates and attendance | Populated from CLA imports |
-| `loot-distribution.json` | Historical loot per raid | Edit via the Loot Log tab |
-| `gear-item-ids.json` | Item name → Wowhead ID map | Add items as they appear |
-| `set-bonuses.json` | Tier set bonus multipliers | Edit via the T4/T5/T6 tab |
-| `cla-sheets.json` | CLA sheet references | Added via the CLA tab |
-
-The repo ships with template/empty versions of all these files.
-
-### Run the seed command
-
-1. Open your deployed dashboard in a browser
+1. Open your [deployed dashboard](https://<your-username>.github.io/<your-repo>/) in a browser
 2. Enter your write token in the **Write Token** field and click **Save Token**
 3. Open the browser developer console (F12 → Console)
 4. Run:
@@ -189,11 +161,15 @@ If you deployed your own Apps Script project in Section 2, no additional steps a
   ...
   "enable_wcl": true,
   "wcl_client_id": "paste-your-client-id-here",
-  "wcl_realm": "your-realm-slug"
+  "wcl_realm": "your-realm-name",
+  "wcl_zone_id": 1048,
+  "wcl_game_slug": "tbc-classic"
 }
 ```
 
-The realm slug is the lowercase hyphenated version of your realm name as it appears in WarcraftLogs URLs, e.g. `area-52`, `benediction`, `dreamscythe`.
+The realm name is the lowercase hyphenated version of your realm name as it appears in WarcraftLogs URLs, e.g. `area-52`, `nightslayer`, `dreamscythe`.
+
+`wcl_zone_id` controls which raid zone WCL rankings are pulled from. `1048` is Gruul's Lair / Magtheridon for TBC Classic Anniversary — update this as your guild progresses to SSC/TK (1004) or Hyjal/BT (1005). `wcl_game_slug` must match the game version on WarcraftLogs: `tbc-classic` for TBC Classic Anniversary, `classic` for Season of Discovery.
 
 ### Connect in the Dashboard
 
@@ -202,21 +178,19 @@ The realm slug is the lowercase hyphenated version of your realm name as it appe
 3. After authorising, you'll be redirected back and the button changes to **⚡ Connected to WarcraftLogs**
 4. WCL performance data will now appear in the WCL column on all player tables
 
-WCL data automatically uses the most recent raid zone — no zone ID configuration required.
-
 ---
 
 ## 7. Set Up CLA Sheets
 
-CLA (Combat Log Analyser) is the source of attendance, gear issues, and consumable data.
+CLA (Combat Log Analyser) is the source of attendance, current gear, gear issues, and consumable data.
 
-1. Navigate to the **CLA** tab in the dashboard (requires write token)
-2. Click **+ Add CLA Sheet** for each raid you want to import
+1. Navigate to the **CLA** tab in the dashboard
+2. Click **+ Add CLA Sheet** for each raid you want to import (requires write token)
 3. For each entry, provide:
    - **Label**: a short name shown in the attendance table (e.g. `Mar 19`)
    - **Google Sheet URL**: the URL of the CLA export sheet
    - **Issues GID**: the `gid=` parameter from the gear issues tab URL
-   - **Gear GID** *(optional)*: the `gid=` parameter from the gear listing tab URL
+   - **Gear GID**: the `gid=` parameter from the gear listing tab URL
    - **Consumes GID**: the `gid=` parameter from the buff consumables tab URL
 4. Click **Save** — data is fetched and attendance/gear scores update immediately
 
@@ -228,7 +202,7 @@ CLA (Combat Log Analyser) is the source of attendance, gear issues, and consumab
 
 1. Navigate to the **Roster** tab (part of the Management dropdown, requires write token)
 2. Use the **Add Raider** form at the bottom to add each player with their role and class
-3. As you add CLA sheets, any players seen in CLA exports but not on the roster will appear in the **Seen in CLA — Not on Roster** panel. Click ✕ to permanently exclude bench players
+3. As you add CLA sheets, any players seen in CLA exports but not on the roster will appear in the **Seen in CLA — Not on Roster** panel. Click ✕ to permanently exclude old players
 
 ---
 
@@ -242,13 +216,12 @@ CLA (Combat Log Analyser) is the source of attendance, gear issues, and consumab
 
 ### Adding Loot
 
-On the **Loot Distribution** tab or via the **+ LOG** button in any player's loot dropdown on the Loot Distribution tab.
+On the **Loot Log** tab items can be assigned to raiders. Alternatively the **+ LOG** button in any player's loot dropdown on the Loot Distribution tab will add the item to that player on the most recent raid.
 
 ### Updating BiS Lists and Priorities
 
-- **Item Glossary** tab: set prioritization multipliers per item
-- **BiS Lists** tab: set EPV values per spec/slot
-- **T4/T5/T6** tabs: configure set bonus multipliers
+- **Item Glossary** tab: set prioritization multipliers per item, this is how the loot council can include custom role/class/player priorities in the Priority calculation. Tier tokens can have bonuses assigned to set completions to reflect the added value of set bonuses.
+- **BiS Lists** tab: set EPV values per spec/slot, EPV values are calculated via a mathematical formula, but if the loot council does not think the calculated value accurately represents the value of the item, it can be overridden.
 
 ---
 
