@@ -2834,8 +2834,11 @@ async function proxyFetch(targetUrl) {
 }
 
 async function fetchSheet(sheetId, gid) {
+  // Apps Script handles CORS directly — call it without a third-party proxy
   const rawUrl = APPS_SCRIPT + '?sheetId=' + sheetId + '&gid=' + gid;
-  const text = await proxyFetch(rawUrl);
+  const res = await fetch(rawUrl);
+  if (!res.ok) throw new Error('Apps Script fetch failed: ' + res.status);
+  const text = await res.text();
   if (!text.trim() || !text.includes(',')) throw new Error('Response does not look like CSV');
   return text;
 }
