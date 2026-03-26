@@ -47,7 +47,7 @@ function handleWcl(e) {
     // ── WCL GraphQL Query ─────────────────────────────────────────
     // Query is base64-encoded to handle special characters safely
     if (action === 'wclQuery') {
-      const query = decodeURIComponent(escape(atob(params.q)));
+      const query = Utilities.newBlob(Utilities.base64Decode(params.q)).getDataAsString();
       const token = params.token;
 
       const response = UrlFetchApp.fetch('https://www.warcraftlogs.com/api/v2/client', {
