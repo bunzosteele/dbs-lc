@@ -2740,8 +2740,9 @@ async function fetchWclAllStars(realm) {
   if (!ENABLE_WCL) return;
   const token = await getWclToken();
   if (!token) {
-    // No token — clear all WCL spinners so they don't spin forever
-    if (lastRenderData) {
+    // Token expired or missing — show connect button, hide column, clear spinners
+    setWclStatus('Not connected', '');
+    if (lastRenderData?.roles) {
       lastRenderData.roles.flatMap(r => r.players).forEach(p => {
         if (p.name) updateWclCell(normalizeName(p.name), null);
       });
@@ -4882,12 +4883,16 @@ loadClaSheetsFromRepo().then(async () => {
     if (token) {
       fetchWclAllStars(WCL_REALM);
     } else {
-      // No valid token — clear all WCL spinners so they don't hang
-      if (lastRenderData?.roles) {
-        lastRenderData.roles.flatMap(r => r.players).forEach(p => {
-          if (p.name) updateWclCell(normalizeName(p.name), null);
-        });
-      }
+      // No valid token — show connect button, hide WCL column
+      setWclStatus('Not connected', '');
+      // Also clear any spinners that rendered (defer slightly to let render complete)
+      setTimeout(() => {
+        if (lastRenderData?.roles) {
+          lastRenderData.roles.flatMap(r => r.players).forEach(p => {
+            if (p.name) updateWclCell(normalizeName(p.name), null);
+          });
+        }
+      }, 200);
     }
   }
 });
