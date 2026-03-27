@@ -1,11 +1,12 @@
 # Apps Script Setup Guide
 
-The Apps Script proxy enables two optional features:
+The Apps Script proxy enables three optional features:
 
 - **CLA via Google Sheets** — fetch your CLA exports directly from Google Sheets by URL, instead of pasting CSV manually
 - **Item icon lookups** — automatically fetch Wowhead icons for items not already in the item database
+- **Warcraftlog Player Data** — automatically fetches warcrat logs data for every player and displays it alongside other information on most tables.
 
-If you set `"enable_apps_script": false` in `config.json`, neither feature is needed and you can skip this guide entirely. CLA data can still be imported by pasting raw CSV directly in the dashboard.
+If you set `"enable_apps_script": false` and `"enable_wcl": false` in `config.json`, all features are disabled and you can skip this guide entirely. CLA data can still be imported by pasting raw CSV directly in the dashboard, unknown items will display without wowhead enrichment (tooltips/icons), and the warcraft logs column will be hidden.
 
 ---
 
