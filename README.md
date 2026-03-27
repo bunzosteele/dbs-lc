@@ -101,6 +101,8 @@ This also requires completion of the Apps Script set-up.
 
 Commit and push — GitHub Pages will redeploy automatically.
 
+> **Tip:** To use a custom browser tab icon, replace `favicon.ico` in the root of your repo with your own 32×32 or 64×64 pixel `.ico` file.
+
 ---
 
 ## 5. Seed the KV Store
