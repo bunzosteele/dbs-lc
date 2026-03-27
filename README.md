@@ -131,16 +131,17 @@ migrateFromGitHub()
 
 ## 6. Set Up CLA Sheets
 
-CLA (Combat Log Analyser) is the source of attendance, current gear, gear issues, and consumable data.
+CLA (Combat Log Analytics) is the source of attendance, current gear, gear issues, and consumable data.
 
 1. Navigate to the **CLA** tab in the dashboard (requires write token)
 2. Click **+ Add** for each raid you want to import
 
 **If `enable_apps_script` is false (paste mode):**
 - Enter a **Label** (e.g. `Mar 25`)
-- Open your CLA Google Sheet, go to each tab, and use **File → Download → CSV**
-- Paste the CSV contents into the **Gear Issues**, **Gear Listing** (optional), and **Buff Consumables** fields
+- Open your CLA Google Sheet, go to each tab, press **Ctrl+A** then **Ctrl+C**
+- Paste directly into the **Gear Issues**, **Gear Listing** (optional), and **Buff Consumables** fields
 - Click **+ Add** — data is parsed immediately
+- Both tab-separated (clipboard) and CSV (downloaded) formats are accepted
 
 **If `enable_apps_script` is true (URL mode):**
 - Enter a **Label**, the **Google Sheet URL**, and the GID for each tab
