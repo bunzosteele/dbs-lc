@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <link rel="icon" type="image/x-icon" href="favicon.ico">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>DBS LC</title>
+<title>LC Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap" rel="stylesheet">
 <style>
   :root {
@@ -1253,7 +1253,7 @@
         <div>
           <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:8px;">FINAL SCORE</div>
           <div style="font-family:monospace;font-size:12px;background:var(--bg2);padding:8px 12px;border-left:2px solid var(--gold-dim);color:var(--text-dim);">
-            score = AttendanceScore × ConsumeMod × GearMod × LootMod × HardSoftPrio × BisMod
+            score = AttendanceScore<span id="formulaConsumeLabel"> × ConsumeMod</span><span id="formulaGearLabel"> × GearMod</span> × LootMod × HardSoftPrio<span id="formulaBisLabel"> × BisMod</span><span id="formulaAltLabel"> × AltMod</span>
           </div>
           <div style="margin-top:8px;color:var(--text-dim);">All scores are normalised so the highest-scoring eligible player = 100. Each modifier multiplies the running total — no single factor is additive.</div>
         </div>
@@ -1262,16 +1262,16 @@
           <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:8px;">ATTENDANCE SCORE <span style="color:var(--text-dim);font-weight:400;">(primary driver)</span></div>
           <div style="font-family:monospace;font-size:12px;background:var(--bg2);padding:8px 12px;border-left:2px solid var(--gold-dim);color:var(--text-dim);">
             tenure = 4 × log₂(raidsAttended + 1)<br>
-            effPct = rawPct + (100 − rawPct) × (1 − 1/(1 + raids/8))<br>
-            AttendanceScore = floor(effPct / 10) × tenure
+            <span id="formulaEffAttLine">effPct = rawPct + (100 − rawPct) × (1 − 1/(1 + raids/8))<br>
+            AttendanceScore = floor(effPct / 10) × tenure</span><span id="formulaRawAttLine" style="display:none;">AttendanceScore = floor(rawPct / 10) × tenure</span>
           </div>
           <div style="margin-top:8px;color:var(--text-dim);">
             Tenure follows a logarithmic curve, giving the most weight to early raids. The difference between attending 2 and 5 raids is much more significant than between 20 and 25. The curve flattens substantially after ~10 raids, preventing long-tenured veterans from being insurmountably ahead of established raiders.<br><br>
-            The effective attendance percentage blends a veteran's raw percentage toward 100% based on tenure, so an occasional absence does not permanently harm a long-standing raider's priority. New raiders receive little or no forgiveness — consistent attendance in the early weeks is expected and indicative of long-term reliability. Raiders must have attended at least 2 raids to receive any score.
+            <span id="formulaEffAttDesc">The effective attendance percentage blends a veteran's raw percentage toward 100% based on tenure, so an occasional absence does not permanently harm a long-standing raider's priority. New raiders receive little or no forgiveness — consistent attendance in the early weeks is expected and indicative of long-term reliability.</span><span id="formulaRawAttDesc" style="display:none;">Raw attendance percentage is used with no veteran forgiveness — every absence counts equally regardless of raid history.</span> Raiders must have attended at least 2 raids to receive any score.
           </div>
         </div>
 
-        <div>
+        <div id="formulaConsumeSection">
           <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:8px;">CONSUME MODIFIER <span style="color:var(--text-dim);font-weight:400;">(×0.5 – ×1.0)</span></div>
           <div style="font-family:monospace;font-size:12px;background:var(--bg2);padding:8px 12px;border-left:2px solid var(--gold-dim);color:var(--text-dim);">
             ConsumeMod = 1 / (1 + missingPct / 100)<br>
@@ -1284,7 +1284,7 @@
           </div>
         </div>
 
-        <div>
+        <div id="formulaGearSection">
           <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:8px;">GEAR MODIFIER <span style="color:var(--text-dim);font-weight:400;">(×0.5 – ×1.0)</span></div>
           <div style="font-family:monospace;font-size:12px;background:var(--bg2);padding:8px 12px;border-left:2px solid var(--gold-dim);color:var(--text-dim);">
             GearMod = 1 / (1 + 0.1 × gearIssues)
@@ -1318,7 +1318,7 @@
           <div style="margin-top:8px;color:var(--text-dim);">Configured per tier set by the Loot Council. Piece count is checked against loot distribution and currently equipped gear.</div>
         </div>
 
-        <div>
+        <div id="formulaAltSection">
           <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:8px;">ALTERNATIVES MODIFIER <span style="color:var(--text-dim);font-weight:400;">(×0.71 – ×1.0)</span></div>
           <div style="font-family:monospace;font-size:12px;background:var(--bg2);padding:8px 12px;border-left:2px solid var(--gold-dim);color:var(--text-dim);">
             AltMod = 1 / (1 + alts × 0.05)<br>
@@ -1327,7 +1327,7 @@
           <div style="margin-top:8px;color:var(--text-dim);">Counts unique items on the player's BiS list in the same slot with EPV more than 5% above their currently equipped item, limited to the phase in which the considered item first appears.</div>
         </div>
 
-        <div>
+        <div id="formulaBisSection">
           <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:8px;">BIS UPGRADE MODIFIER <span style="color:var(--text-dim);font-weight:400;">(×0.1 – ×2.0)</span></div>
           <div style="font-family:monospace;font-size:12px;background:var(--bg2);padding:8px 12px;border-left:2px solid var(--gold-dim);color:var(--text-dim);">
             Within ±5%: ×1.0 (sidegrade) &nbsp;|&nbsp; Outside ±5%: ×(1.0 + pct×0.02), upgrades capped at +50%<br>
@@ -2637,6 +2637,17 @@ let GUILD_NAME = "Don't Be Suspicious";
 let GUILD_SUBTITLE = 'Loot Council Summary';
 let PAGE_TITLE = 'DBS LC';
 let ENABLE_WCL = false; // default off until config loaded
+// Formula config — overridden by config.json
+let FORMULA_USE_EFFECTIVE_ATTENDANCE = true;
+let FORMULA_USE_CONSUME_MOD = true;
+let FORMULA_USE_GEAR_MOD = true;
+let FORMULA_USE_BIS_UPGRADE = true;
+let FORMULA_USE_ALT_MOD = true;
+let FORMULA_GEAR_MOD_WEIGHT = 0.1;
+let FORMULA_LOOT_MOD_FLOOR = 0.33;
+let FORMULA_LOOT_MOD_CEILING = 1.0;
+let FORMULA_ALT_MOD_WEIGHT = 0.05;
+let FORMULA_TENURE_FORGIVENESS_HALFLIFE = 8; // raids at which forgiveness reaches 50%
 let ENABLE_APPS_SCRIPT = true; // default on; set false to use paste-in mode for CLA
 const GITHUB_FILE = 'cla-sheets.json';
 const GEAR_IDS_FILE = 'gear-item-ids.json';
@@ -3289,32 +3300,39 @@ function calculatePriority(p, bottom20threshold, top20threshold, pointValues) {
   // Must have attended more than 2 raids
   if (!p.pct || p.attended < 2) return { score: 0, tooltip: 'Insufficient raids attended' };
 
-  // Attendance score: log-curve tenure * effective pct tier
-  // - tenure: 4*log2(attended+1) gives diminishing returns after ~10 raids
-  // - effective pct: blends toward 100% for veterans, forgiving occasional absences
+  // Attendance score: log-curve tenure * pct tier (raw or effective based on config)
   const tenureScore = 4 * Math.log2(p.attended + 1);
-  const forgiveness = 1 - 1 / (1 + p.attended / 8);
-  const effPct = p.pct + (100 - p.pct) * forgiveness;
+  const forgiveness = 1 - 1 / (1 + p.attended / FORMULA_TENURE_FORGIVENESS_HALFLIFE);
+  const effPct = FORMULA_USE_EFFECTIVE_ATTENDANCE
+    ? p.pct + (100 - p.pct) * forgiveness
+    : p.pct;
   const attFloor = Math.floor(effPct / 10);
   const attScore = attFloor * tenureScore;
 
   // Consume modifier: 1 / (1 + missingConsumePct/100) — uses adjusted scores
-  const _adjConsumeScores = getAdjustedConsumeScores(p.name);
-  const avgConsume = _adjConsumeScores.length ? _adjConsumeScores.reduce((a, b) => a + b, 0) / _adjConsumeScores.length : 100;
-  const missingConsume = Math.max(0, 100 - avgConsume);
-  const consumeMod = 1 / (1 + missingConsume / 100);
+  let consumeMod = 1;
+  let missingConsume = 0;
+  if (FORMULA_USE_CONSUME_MOD) {
+    const _adjConsumeScores = getAdjustedConsumeScores(p.name);
+    const avgConsume = _adjConsumeScores.length ? _adjConsumeScores.reduce((a, b) => a + b, 0) / _adjConsumeScores.length : 100;
+    missingConsume = Math.max(0, 100 - avgConsume);
+    consumeMod = 1 / (1 + missingConsume / 100);
+  }
 
-  // Gear modifier: 1 / (1 + 0.1 * gearIssues)
-  // Suboptimal enchants only count as issues on top-5 BiS items for this player's spec
-  const gi = latestGearIssuesByPlayer[normalizeName(p.name)];
-  const gearIssueCount = (gi?.issues || []).reduce((count, issue) => {
-    if (typeof issue === 'string' && !/\bZG\b/i.test(issue)) return count + 1; // always-flagged (no gem/enchant)
-    if (issue?.suboptimal && !/\bZG\b/i.test(issue.raw || '')) return count + (isTop5BisItem(issue.itemName, p.name) ? 1 : 0);
-    return count;
-  }, 0);
-  const gearMod = 1 / (1 + 0.1 * gearIssueCount);
+  // Gear modifier: 1 / (1 + weight * gearIssues)
+  let gearMod = 1;
+  let gearIssueCount = 0;
+  if (FORMULA_USE_GEAR_MOD) {
+    const gi = latestGearIssuesByPlayer[normalizeName(p.name)];
+    gearIssueCount = (gi?.issues || []).reduce((count, issue) => {
+      if (typeof issue === 'string' && !/\bZG\b/i.test(issue)) return count + 1;
+      if (issue?.suboptimal && !/\bZG\b/i.test(issue.raw || '')) return count + (isTop5BisItem(issue.itemName, p.name) ? 1 : 0);
+      return count;
+    }, 0);
+    gearMod = 1 / (1 + FORMULA_GEAR_MOD_WEIGHT * gearIssueCount);
+  }
 
-  // Loot score modifier — 5 tiers based on points position within role
+  // Loot score modifier — continuous based on percentile within role
   const pts = pointsByPlayer[normalizeName(p.name)] ?? 0;
   const maxPts = pointValues.length > 0 ? pointValues[pointValues.length - 1] : 0;
   const nonZeroPts = pointValues.filter(v => v > 0);
@@ -3324,29 +3342,26 @@ function calculatePriority(p, bottom20threshold, top20threshold, pointValues) {
   const isZeroOrLowest = pts === 0 || (!hasZeros && minNonZeroPts !== null && pts === minNonZeroPts);
   const isTop20 = !isHighest && !isZeroOrLowest && pts >= top20threshold && pointValues.length > 0;
   const isBottom20 = !isHighest && !isZeroOrLowest && pts <= bottom20threshold && pointValues.length > 0;
-  // Continuous loot modifier: 0.7 - percentile*0.4 (range: 0.7 at zero → 0.3 at highest)
-  // percentile = position within role's point distribution (0=lowest, 1=highest)
   let lootPercentile = 0;
   if (pointValues.length > 1 && pts > 0) {
     const ranked = [...pointValues].sort((a,b) => a-b);
     const pos = ranked.filter(v => v < pts).length;
     lootPercentile = pos / (ranked.length - 1);
-  } else if (pts === 0 || pointValues.length === 0) {
-    lootPercentile = 0;
   }
-  const lootMod = 1.0 - lootPercentile * (2/3);
+  const lootRange = FORMULA_LOOT_MOD_CEILING - FORMULA_LOOT_MOD_FLOOR;
+  const lootMod = FORMULA_LOOT_MOD_CEILING - lootPercentile * lootRange;
   const lootTier = `Loot percentile ${(lootPercentile*100).toFixed(0)}% → ×${lootMod.toFixed(3)}`;
 
   const score = attScore * consumeMod * gearMod * lootMod;
 
-  const tooltip = [
-    `Attendance: floor(${effPct.toFixed(1)}%/10)×log(${p.attended}) = ${attScore.toFixed(2)}`,
-    `Consume mod: 1/(1+${missingConsume.toFixed(1)}%) = ×${consumeMod.toFixed(3)} (adj)`,
-    `Gear mod: 1/(1+0.1×${gearIssueCount}) = ×${gearMod.toFixed(3)}`,
-    `Loot mod: ${lootTier}`,
-  ].join('&#10;');
+  const tooltipParts = [
+    `Attendance: floor(${effPct.toFixed(1)}%/10)×log(${p.attended}) = ${attScore.toFixed(2)}${FORMULA_USE_EFFECTIVE_ATTENDANCE ? ' (eff)' : ''}`,
+  ];
+  if (FORMULA_USE_CONSUME_MOD) tooltipParts.push(`Consume mod: 1/(1+${missingConsume.toFixed(1)}%) = ×${consumeMod.toFixed(3)} (adj)`);
+  if (FORMULA_USE_GEAR_MOD)    tooltipParts.push(`Gear mod: 1/(1+${FORMULA_GEAR_MOD_WEIGHT}×${gearIssueCount}) = ×${gearMod.toFixed(3)}`);
+  tooltipParts.push(`Loot mod: ${lootTier}`);
 
-  return { score, tooltip };
+  return { score, tooltip: tooltipParts.join('&#10;') };
 }
 
 function groupPlayers(allPlayers) {
@@ -4700,6 +4715,18 @@ async function loadGearItemIdsFromRepo() {
     if (cfg.guild_subtitle)      GUILD_SUBTITLE       = cfg.guild_subtitle;
     if (cfg.page_title)          PAGE_TITLE           = cfg.page_title;
     if (cfg.enable_wcl != null)        ENABLE_WCL          = !!cfg.enable_wcl;
+    if (cfg.formula) {
+      const f = cfg.formula;
+      if (f.use_effective_attendance != null) FORMULA_USE_EFFECTIVE_ATTENDANCE = !!f.use_effective_attendance;
+      if (f.use_consume_modifier     != null) FORMULA_USE_CONSUME_MOD          = !!f.use_consume_modifier;
+      if (f.use_gear_modifier        != null) FORMULA_USE_GEAR_MOD             = !!f.use_gear_modifier;
+      if (f.use_bis_upgrade_modifier != null) FORMULA_USE_BIS_UPGRADE          = !!f.use_bis_upgrade_modifier;
+      if (f.use_alt_modifier         != null) FORMULA_USE_ALT_MOD              = !!f.use_alt_modifier;
+      if (f.gear_modifier_weight     != null) FORMULA_GEAR_MOD_WEIGHT          = +f.gear_modifier_weight;
+      if (f.loot_mod_floor           != null) FORMULA_LOOT_MOD_FLOOR           = +f.loot_mod_floor;
+      if (f.loot_mod_ceiling         != null) FORMULA_LOOT_MOD_CEILING         = +f.loot_mod_ceiling;
+      if (f.alt_modifier_weight      != null) FORMULA_ALT_MOD_WEIGHT           = +f.alt_modifier_weight;
+    }
     if (cfg.enable_apps_script != null) ENABLE_APPS_SCRIPT  = !!cfg.enable_apps_script;
     if (cfg.wcl_client_id)       WCL_CLIENT_ID        = cfg.wcl_client_id;
     if (cfg.wcl_realm)           WCL_REALM            = cfg.wcl_realm;
@@ -4723,6 +4750,23 @@ async function loadGearItemIdsFromRepo() {
       claScript.style.display = ENABLE_APPS_SCRIPT ? '' : 'none';
       claPaste.style.display = ENABLE_APPS_SCRIPT ? 'none' : '';
     }
+    // Toggle formula explanation sections based on formula config
+    const _fToggle = (id, visible) => { const el = document.getElementById(id); if (el) el.style.display = visible ? '' : 'none'; };
+    _fToggle('formulaConsumeSection', FORMULA_USE_CONSUME_MOD);
+    _fToggle('formulaConsumeLabel',   FORMULA_USE_CONSUME_MOD);
+    _fToggle('formulaGearSection',    FORMULA_USE_GEAR_MOD);
+    _fToggle('formulaGearLabel',      FORMULA_USE_GEAR_MOD);
+    _fToggle('formulaBisSection',     FORMULA_USE_BIS_UPGRADE);
+    _fToggle('formulaBisLabel',       FORMULA_USE_BIS_UPGRADE);
+    _fToggle('formulaAltSection',     FORMULA_USE_ALT_MOD);
+    _fToggle('formulaAltLabel',       FORMULA_USE_ALT_MOD);
+    // Effective attendance toggle
+    _fToggle('formulaEffAttLine',  FORMULA_USE_EFFECTIVE_ATTENDANCE);
+    _fToggle('formulaEffAttDesc',  FORMULA_USE_EFFECTIVE_ATTENDANCE);
+    _fToggle('formulaRawAttLine',  !FORMULA_USE_EFFECTIVE_ATTENDANCE);
+    _fToggle('formulaRawAttDesc',  !FORMULA_USE_EFFECTIVE_ATTENDANCE);
+    const _hl = document.getElementById('formulaHalflifeDisplay');
+    if (_hl) _hl.textContent = FORMULA_TENURE_FORGIVENESS_HALFLIFE;
     console.log('config.json loaded — worker:', CF_WORKER_URL, '| WCL:', ENABLE_WCL, '| Apps Script:', ENABLE_APPS_SCRIPT);
   } catch(e) {
     console.warn('config.json not found or invalid — using defaults:', e.message);
@@ -7724,7 +7768,7 @@ function onItemChange() {
     altIds.delete(effectiveId);
 
     const alts = altIds.size;
-    const mult = 1 / (1 + alts * 0.05);
+    const mult = 1 / (1 + alts * FORMULA_ALT_MOD_WEIGHT);
     return { mult, alts };
   }
 
@@ -7733,7 +7777,9 @@ function onItemChange() {
     const setBonusMult = TOKEN_TIER_META[_candidateItemId]
       ? getSetBonusMultiplier(p.name, _candidateItemId).mult
       : 1;
-    return base * prioMultiplier(p).mult * bisMultiplier(p).mult * setBonusMult * altModifier(p).mult;
+    const _bisMult = FORMULA_USE_BIS_UPGRADE ? bisMultiplier(p).mult : 1;
+    const _altMult = FORMULA_USE_ALT_MOD ? altModifier(p).mult : 1;
+    return base * prioMultiplier(p).mult * _bisMult * setBonusMult * _altMult;
   }
 
   // Now that bisMultiplier is defined, compute normalization factor
@@ -8078,7 +8124,9 @@ function onItemChange() {
       ? getSetBonusMultiplier(p.name, _candidateTokenId)
       : { mult: 1, labels: [] };
     const { mult: altMult, alts: altCount } = altModifier(p);
-    const adjScore = prScore * mult * bisMult * setBonusMult * altMult;
+    const _adjBisMult = FORMULA_USE_BIS_UPGRADE ? bisMult : 1;
+    const _adjAltMult = FORMULA_USE_ALT_MOD ? altMult : 1;
+    const adjScore = prScore * mult * _adjBisMult * setBonusMult * _adjAltMult;
     const normPr = Math.round(adjScore * prNormFactor);
     const displayPr = normPr.toFixed(0);
     const prStr = prScore > 0 ? displayPr : '—';
