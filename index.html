@@ -1393,9 +1393,9 @@
       </div>
       <!-- Paste mode fields (shown when enable_apps_script: false) -->
       <div id="claPasteFields" style="display:none;">
-        <textarea class="cla-input wide" id="claPasteGear" rows="3" placeholder="Paste Gear Issues tab CSV here…" style="width:100%;resize:vertical;font-size:10px;"></textarea>
-        <textarea class="cla-input wide" id="claPasteGearListing" rows="3" placeholder="Paste Gear Listing tab CSV here (optional)…" style="width:100%;resize:vertical;font-size:10px;margin-top:4px;"></textarea>
-        <textarea class="cla-input wide" id="claPasteBuff" rows="3" placeholder="Paste Buff Consumables tab CSV here…" style="width:100%;resize:vertical;font-size:10px;margin-top:4px;"></textarea>
+        <textarea class="cla-input wide" id="claPasteGear" rows="3" placeholder="Ctrl+A, Ctrl+C from Gear Issues tab, paste here…" style="width:100%;resize:vertical;font-size:10px;"></textarea>
+        <textarea class="cla-input wide" id="claPasteGearListing" rows="3" placeholder="Ctrl+A, Ctrl+C from Gear Listing tab (optional)…" style="width:100%;resize:vertical;font-size:10px;margin-top:4px;"></textarea>
+        <textarea class="cla-input wide" id="claPasteBuff" rows="3" placeholder="Ctrl+A, Ctrl+C from Buff Consumables tab, paste here…" style="width:100%;resize:vertical;font-size:10px;margin-top:4px;"></textarea>
       </div>
       <button class="btn write-gated" onclick="addCla()">+ Add</button>
     </div>
@@ -1828,6 +1828,23 @@ function rebuildGlossaryData() {
 }
 
 // Legacy stub — no longer fetches from sheet
+// Normalize pasted CLA content — handles both TSV (clipboard) and CSV (downloaded)
+function normalizeClaPaste(text) {
+  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  // Detect TSV by checking if the first line has more tabs than commas
+  const firstLine = text.split('\n')[0] || '';
+  const tabCount = (firstLine.match(/\t/g) || []).length;
+  const commaCount = (firstLine.match(/,/g) || []).length;
+  if (tabCount <= commaCount) return text; // already CSV-like
+  // Convert TSV to CSV: tabs → commas, handle no special quoting needed for CLA data
+  return text.split('\n').map(line =>
+    line.split('\t').map(cell => {
+      // Quote cells containing commas
+      return cell.includes(',') ? '"' + cell.replace(/"/g, '""') + '"' : cell;
+    }).join(',')
+  ).join('\n');
+}
+
 function parseCsvRows(text) {
   const lines = text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n');
   return lines.map(line => {
@@ -4197,10 +4214,14 @@ function addCla() {
     document.getElementById('claGearListingGid').value = '';
   } else {
     // Paste mode — raw CSV pasted directly
-    const csvGear = document.getElementById('claPasteGear').value.trim();
-    const csvBuff = document.getElementById('claPasteBuff').value.trim();
-    const csvGearListing = document.getElementById('claPasteGearListing').value.trim();
-    if (!csvGear || !csvBuff) { alert('Please paste the Gear Issues and Buff Consumables CSV data.'); return; }
+    const csvGearRaw = document.getElementById('claPasteGear').value.trim();
+    const csvBuffRaw = document.getElementById('claPasteBuff').value.trim();
+    const csvGearListingRaw = document.getElementById('claPasteGearListing').value.trim();
+    if (!csvGearRaw || !csvBuffRaw) { alert('Please paste the Gear Issues and Buff Consumables data.'); return; }
+    // Normalize TSV (Ctrl+A, Ctrl+C from Google Sheets) or CSV (downloaded)
+    const csvGear = normalizeClaPaste(csvGearRaw);
+    const csvBuff = normalizeClaPaste(csvBuffRaw);
+    const csvGearListing = csvGearListingRaw ? normalizeClaPaste(csvGearListingRaw) : '';
     entry = { label, csvGear, csvBuff };
     if (csvGearListing) entry.csvGearListing = csvGearListing;
     // Parse immediately since we have the data now
@@ -4412,11 +4433,11 @@ async function fetchAllClaData() {
     // Apply paste-mode entries directly
     pasteSheets.forEach(s => {
       if (!_claStoredParsed[s.label]) {
-        try { parseGearIssues(s.csvGear, s.label); } catch(e) {}
-        try { parseBuffConsumables(s.csvBuff, s.label); } catch(e) {}
+        try { parseGearIssues(normalizeClaPaste(s.csvGear||''), s.label); } catch(e) {}
+        try { parseBuffConsumables(normalizeClaPaste(s.csvBuff||''), s.label); } catch(e) {}
         if (s.csvGearListing) {
           try {
-            const gd = parseGearListing(s.csvGearListing);
+            const gd = parseGearListing(normalizeClaPaste(s.csvGearListing));
             Object.entries(gd).forEach(([n, slots]) => {
               gearListingByPlayer[normalizeName(n)] = { label: s.label, slots };
             });
@@ -4434,10 +4455,13 @@ async function fetchAllClaData() {
 
   // Parse paste-mode entries immediately (no fetch needed)
   pasteSheets.forEach((sheet, idx) => {
-    try { parseGearIssues(sheet.csvGear, sheet.label); } catch(e) {}
-    try { parseBuffConsumables(sheet.csvBuff, sheet.label); } catch(e) {}
-    if (sheet.csvGearListing) {
-      gearListingResults.push({ label: sheet.label, text: sheet.csvGearListing, sheetIdx: claSheets.indexOf(sheet) });
+    const csvGear = normalizeClaPaste(sheet.csvGear || '');
+    const csvBuff = normalizeClaPaste(sheet.csvBuff || '');
+    const csvGearListing = sheet.csvGearListing ? normalizeClaPaste(sheet.csvGearListing) : '';
+    try { parseGearIssues(csvGear, sheet.label); } catch(e) {}
+    try { parseBuffConsumables(csvBuff, sheet.label); } catch(e) {}
+    if (csvGearListing) {
+      gearListingResults.push({ label: sheet.label, text: csvGearListing, sheetIdx: claSheets.indexOf(sheet) });
     }
   });
 
