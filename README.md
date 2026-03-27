@@ -24,21 +24,11 @@ A TBC Classic loot council dashboard that tracks raid attendance, consumable usa
 
 ---
 
-## 2. Set Up the Google Apps Script Proxy
+## 2. Set Up the Google Apps Script Proxy *(Optional)*
 
-The dashboard uses a single Google Apps Script project as a server-side proxy for CLA sheet fetches, Wowhead item lookups, and (optionally) WarcraftLogs OAuth and GraphQL.
+The Apps Script proxy enables fetching CLA data directly from Google Sheets by URL, and loading item icons from Wowhead. **This step is optional** — if you set `"enable_apps_script": false` in `config.json`, you can skip it entirely and paste CLA CSV data manually in the dashboard instead.
 
-### Create the Project
-
-1. Go to [script.google.com](https://script.google.com) and click **New project**
-2. This repo contains four script files in `scripts/` — add each as a separate file within the same project:
-   - `proxy.gs` — CLA sheet fetches and Wowhead item lookups
-   - `wcl-proxy.gs` — WarcraftLogs OAuth and GraphQL (only needed if you plan to enable warcraftlogs integration)
-   - `icon-lookup.gs` — item icon lookups by Wowhead ID
-   - `main.gs` — file that routes all requests to the correct handler
-3. Click **Deploy → New deployment**
-4. Type: **Web app** · Execute as: **Me** · Who has access: **Anyone**
-5. Click **Deploy** and copy the URL and set this as your `apps_script` value in `config.json`
+If you want to enable Apps Script, see **[APPS-SCRIPT.md](APPS-SCRIPT.md)** for full setup instructions.
 
 ---
 
@@ -90,10 +80,17 @@ Edit `config.json` in the root of your repo:
   "guild_subtitle": "Loot Council Summary",
   "page_title": "Your Guild Name",
   "cf_worker_url": "https://your-worker.your-subdomain.workers.dev",
-  "apps_script": "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec",
+  "enable_apps_script": false,
   "enable_wcl": false
 }
 ```
+
+To enable Apps Script (Google Sheets CLA fetching + item icons), add:
+```json
+  "enable_apps_script": true,
+  "apps_script": "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec"
+```
+See [APPS-SCRIPT.md](APPS-SCRIPT.md) for how to deploy the script.
 
 If you want WarcraftLogs integration (see Section 6), change "enable_wcl" to true and add:
 ```json
@@ -184,17 +181,18 @@ The realm name is the lowercase hyphenated version of your realm name as it appe
 
 CLA (Combat Log Analyser) is the source of attendance, current gear, gear issues, and consumable data.
 
-1. Navigate to the **CLA** tab in the dashboard
-2. Click **+ Add CLA Sheet** for each raid you want to import (requires write token)
-3. For each entry, provide:
-   - **Label**: a short name shown in the attendance table (e.g. `Mar 19`)
-   - **Google Sheet URL**: the URL of the CLA export sheet
-   - **Issues GID**: the `gid=` parameter from the gear issues tab URL
-   - **Gear GID**: the `gid=` parameter from the gear listing tab URL
-   - **Consumes GID**: the `gid=` parameter from the buff consumables tab URL
-4. Click **Save** — data is fetched and attendance/gear scores update immediately
+1. Navigate to the **CLA** tab in the dashboard (requires write token)
+2. Click **+ Add** for each raid you want to import
 
-> **Finding GIDs:** Open the CLA Google Sheet, click the tab you want, and look at the URL: `...#gid=123456789` — the number after `gid=` is what you need.
+**If `enable_apps_script` is false (paste mode):**
+- Enter a **Label** (e.g. `Mar 25`)
+- Open your CLA Google Sheet, go to each tab, and use **File → Download → CSV**
+- Paste the CSV contents into the **Gear Issues**, **Gear Listing** (optional), and **Buff Consumables** fields
+- Click **+ Add** — data is parsed immediately
+
+**If `enable_apps_script` is true (URL mode):**
+- Enter a **Label**, the **Google Sheet URL**, and the GID for each tab
+- See [APPS-SCRIPT.md](APPS-SCRIPT.md) for details on finding GIDs
 
 ---
 
@@ -235,10 +233,8 @@ On the **Loot Log** tab items can be assigned to raiders. Alternatively the **+ 
 **"Invalid token" on write token entry**
 - Double-check the token matches `WRITE_TOKEN` in your Worker code exactly
 
-**CLA sheets fail to load**
-- Verify the Google Sheet is set to "Anyone with the link can view"
-- Check the GIDs are correct by inspecting the sheet tab URLs
-- Verify the `apps_script` URL in `config.json` is correct and deployed as "Anyone" access
+**CLA sheets fail to load (URL mode)**
+- See [APPS-SCRIPT.md](APPS-SCRIPT.md) for troubleshooting
 
 **WCL shows spinners but no data**
 - Verify the redirect URL in your WCL client matches your GitHub Pages URL exactly
