@@ -1382,12 +1382,21 @@
       <textarea class="cla-input wide" id="claImportText" class="write-gated" rows="3" placeholder="Paste exported CLA data here..." style="width:100%;resize:vertical;"></textarea>
       <button class="btn primary" onclick="importCla()" style="margin-top:6px;">Import</button>
     </div>
-    <div class="cla-add-form">
-      <input class="cla-input" id="claLabel" class="write-gated" placeholder="Label (e.g. 2/26)" />
-      <input class="cla-input wide" id="claUrl" class="write-gated" placeholder="Google Sheet URL" />
-      <input class="cla-input" id="claGearGid" class="write-gated" placeholder="Issues GID" />
-      <input class="cla-input" id="claGearListingGid" class="write-gated" placeholder="Gear GID (optional)" />
-      <input class="cla-input" id="claBuffGid" class="write-gated" placeholder="Consumes GID" />
+    <div class="cla-add-form" id="claAddForm">
+      <input class="cla-input" id="claLabel" placeholder="Label (e.g. 2/26)" />
+      <!-- Apps Script mode fields -->
+      <div id="claScriptFields">
+        <input class="cla-input wide" id="claUrl" placeholder="Google Sheet URL" />
+        <input class="cla-input" id="claGearGid" placeholder="Issues GID" />
+        <input class="cla-input" id="claGearListingGid" placeholder="Gear GID (optional)" />
+        <input class="cla-input" id="claBuffGid" placeholder="Consumes GID" />
+      </div>
+      <!-- Paste mode fields (shown when enable_apps_script: false) -->
+      <div id="claPasteFields" style="display:none;">
+        <textarea class="cla-input wide" id="claPasteGear" rows="3" placeholder="Paste Gear Issues tab CSV here…" style="width:100%;resize:vertical;font-size:10px;"></textarea>
+        <textarea class="cla-input wide" id="claPasteGearListing" rows="3" placeholder="Paste Gear Listing tab CSV here (optional)…" style="width:100%;resize:vertical;font-size:10px;margin-top:4px;"></textarea>
+        <textarea class="cla-input wide" id="claPasteBuff" rows="3" placeholder="Paste Buff Consumables tab CSV here…" style="width:100%;resize:vertical;font-size:10px;margin-top:4px;"></textarea>
+      </div>
       <button class="btn write-gated" onclick="addCla()">+ Add</button>
     </div>
   </div>
@@ -2585,6 +2594,9 @@ async function handleWclCallback() {
   wclTokenExpiry = Date.now() + ((data.expires_in || 3600) - 60) * 1000;
   sessionStorage.setItem('wclToken', wclToken);
   sessionStorage.setItem('wclTokenExpiry', String(wclTokenExpiry));
+  // Also persist to localStorage so token survives page reload
+  localStorage.setItem('wclToken', wclToken);
+  localStorage.setItem('wclTokenExpiry', String(wclTokenExpiry));
   setWclStatus('✓ Connected to WarcraftLogs!', 'success');
   return true; // fetchWclAllStars will be called after fetchData() completes
 }
@@ -2608,6 +2620,7 @@ let GUILD_NAME = "Don't Be Suspicious";
 let GUILD_SUBTITLE = 'Loot Council Summary';
 let PAGE_TITLE = 'DBS LC';
 let ENABLE_WCL = false; // default off until config loaded
+let ENABLE_APPS_SCRIPT = true; // default on; set false to use paste-in mode for CLA
 const GITHUB_FILE = 'cla-sheets.json';
 const GEAR_IDS_FILE = 'gear-item-ids.json';
 let gearItemIds = {}; // item name (lowercase) -> wowhead item ID
@@ -2665,9 +2678,14 @@ function setWclStatus(msg, type = '') {
 async function getWclToken() {
   // Check in-memory token
   if (wclToken && Date.now() < wclTokenExpiry) return wclToken;
-  // Check sessionStorage (survives page reload from PKCE redirect)
-  const stored = sessionStorage.getItem('wclToken');
-  const storedExpiry = parseInt(sessionStorage.getItem('wclTokenExpiry') || '0');
+  // Check sessionStorage first (survives PKCE redirect within same tab)
+  let stored = sessionStorage.getItem('wclToken');
+  let storedExpiry = parseInt(sessionStorage.getItem('wclTokenExpiry') || '0');
+  // Fall back to localStorage (persists across page loads and tab closes)
+  if (!stored || Date.now() >= storedExpiry) {
+    stored = localStorage.getItem('wclToken');
+    storedExpiry = parseInt(localStorage.getItem('wclTokenExpiry') || '0');
+  }
   if (stored && Date.now() < storedExpiry) {
     wclToken = stored;
     wclTokenExpiry = storedExpiry;
@@ -2693,7 +2711,15 @@ async function wclGraphQL(query, token) {
 async function fetchWclAllStars(realm) {
   if (!ENABLE_WCL) return;
   const token = await getWclToken();
-  if (!token) return;
+  if (!token) {
+    // No token — clear all WCL spinners so they don't spin forever
+    if (lastRenderData) {
+      lastRenderData.roles.flatMap(r => r.players).forEach(p => {
+        if (p.name) updateWclCell(normalizeName(p.name), null);
+      });
+    }
+    return;
+  }
   try {
 
     // Build player list with their role for metric selection
@@ -4019,7 +4045,9 @@ function renderClaList() {
     <div class="cla-row">
       <span class="cla-row-label">${s.label}</span>
       <span class="cla-row-url" title="${s.url}">${s.url.substring(0, 60)}...</span>
-      <span class="cla-row-gids">Issues: ${s.gearGid} / Gear: ${s.gearListingGid || '—'} / Consumes: ${s.buffGid}</span>
+      <span class="cla-row-gids">${s.sheetId
+        ? `Issues: ${s.gearGid} / Gear: ${s.gearListingGid || '—'} / Consumes: ${s.buffGid}`
+        : `Paste mode${s.csvGearListing ? ' (with gear listing)' : ''}`}</span>
       <button class="cla-remove" class="write-gated" onclick="removeCla(${i})" title="Remove">✕</button>
     </div>
   `).join('');
@@ -4064,6 +4092,7 @@ function parseGearListing(csvText) {
 async function lookupItemId(itemName) {
   try {
     // Call Apps Script directly (not via proxy) - it handles Wowhead fetch server-side
+    if (!ENABLE_APPS_SCRIPT || !APPS_SCRIPT) return null;
     const rawUrl = APPS_SCRIPT + '?action=itemLookup&name=' + encodeURIComponent(itemName);
     const text = await appsScriptFetch(rawUrl);
     const data = JSON.parse(text);
@@ -4146,35 +4175,59 @@ async function processGearListingForItemIds(sheetId, gearListingGid) {
 
 function addCla() {
   const label = document.getElementById('claLabel').value.trim();
-  const url = document.getElementById('claUrl').value.trim();
-  const gearGid = document.getElementById('claGearGid').value.trim();
-  const buffGid = document.getElementById('claBuffGid').value.trim();
-  const gearListingGid = document.getElementById('claGearListingGid').value.trim();
-  if (!label || !url || !gearGid || !buffGid) {
-    alert('Please fill in all fields.');
-    return;
-  }
-  const sheetId = extractSheetId(url);
-  if (!sheetId) { alert('Could not parse Sheet ID from URL.'); return; }
+  if (!label) { alert('Please enter a label.'); return; }
 
-  const entry = { label, url, sheetId, gearGid, buffGid };
-  if (gearListingGid) entry.gearListingGid = gearListingGid;
+  let entry;
+  if (ENABLE_APPS_SCRIPT) {
+    // Apps Script mode — URL + GIDs
+    const url = document.getElementById('claUrl').value.trim();
+    const gearGid = document.getElementById('claGearGid').value.trim();
+    const buffGid = document.getElementById('claBuffGid').value.trim();
+    const gearListingGid = document.getElementById('claGearListingGid').value.trim();
+    if (!url || !gearGid || !buffGid) { alert('Please fill in the Sheet URL, Issues GID, and Consumes GID.'); return; }
+    const sheetId = extractSheetId(url);
+    if (!sheetId) { alert('Could not parse Sheet ID from URL.'); return; }
+    entry = { label, url, sheetId, gearGid, buffGid };
+    if (gearListingGid) entry.gearListingGid = gearListingGid;
+    // Gap-fill item IDs from gear listing if provided
+    if (gearListingGid && writeToken) processGearListingForItemIds(sheetId, gearListingGid);
+    document.getElementById('claUrl').value = '';
+    document.getElementById('claGearGid').value = '';
+    document.getElementById('claBuffGid').value = '';
+    document.getElementById('claGearListingGid').value = '';
+  } else {
+    // Paste mode — raw CSV pasted directly
+    const csvGear = document.getElementById('claPasteGear').value.trim();
+    const csvBuff = document.getElementById('claPasteBuff').value.trim();
+    const csvGearListing = document.getElementById('claPasteGearListing').value.trim();
+    if (!csvGear || !csvBuff) { alert('Please paste the Gear Issues and Buff Consumables CSV data.'); return; }
+    entry = { label, csvGear, csvBuff };
+    if (csvGearListing) entry.csvGearListing = csvGearListing;
+    // Parse immediately since we have the data now
+    try { parseGearIssues(csvGear, label); } catch(e) { console.warn('Gear issues parse error:', e); }
+    try { parseBuffConsumables(csvBuff, label); } catch(e) { console.warn('Buff consumables parse error:', e); }
+    if (csvGearListing) {
+      try {
+        const gearData = parseGearListing(csvGearListing);
+        Object.entries(gearData).forEach(([playerName, slots]) => {
+          const key = normalizeName(playerName);
+          gearListingByPlayer[key] = { label, slots };
+        });
+      } catch(e) { console.warn('Gear listing parse error:', e); }
+    }
+    _storeParsedClaData();
+    document.getElementById('claPasteGear').value = '';
+    document.getElementById('claPasteBuff').value = '';
+    document.getElementById('claPasteGearListing').value = '';
+  }
+
+  document.getElementById('claLabel').value = '';
   claSheets.push(entry);
   saveClaSheets();
   renderClaList();
   saveClaSheetsToGitHub();
-
-  // If gear listing GID + GitHub token provided, gap-fill item ID map
-  if (gearListingGid && writeToken) {
-    processGearListingForItemIds(sheetId, gearListingGid);
-  }
-
-  document.getElementById('claLabel').value = '';
-  document.getElementById('claUrl').value = '';
-  document.getElementById('claGearGid').value = '';
-  document.getElementById('claBuffGid').value = '';
-  document.getElementById('claGearListingGid').value = '';
-  document.getElementById('claToken').value = '';
+  rebuildAttendanceFromCla();
+  renderAttendancePanel();
 }
 
 function removeCla(i) {
@@ -4346,10 +4399,31 @@ async function fetchAllClaData() {
   claSheetDates = {};
   canonicalNames = {};
 
-  // If all sheets have cached parsed data, use it instead of re-fetching
-  const allCached = claSheets.length > 0 && claSheets.every(s => _claStoredParsed[s.label]);
-  if (allCached) {
-    console.log('Loading CLA data from cache (' + claSheets.length + ' sheets)');
+  // Paste-mode entries already have parsed data stored — only fetch-mode entries need HTTP
+  const fetchSheets = ENABLE_APPS_SCRIPT ? claSheets.filter(s => s.sheetId) : [];
+  const pasteSheets = claSheets.filter(s => s.csvGear || s.csvBuff);
+
+  // If all sheets are either cached or paste-mode, skip fetching entirely
+  const allHandled = claSheets.length > 0 && claSheets.every(s =>
+    _claStoredParsed[s.label] || s.csvGear
+  );
+  if (allHandled) {
+    console.log('Loading CLA data from cache/paste (' + claSheets.length + ' sheets)');
+    // Apply paste-mode entries directly
+    pasteSheets.forEach(s => {
+      if (!_claStoredParsed[s.label]) {
+        try { parseGearIssues(s.csvGear, s.label); } catch(e) {}
+        try { parseBuffConsumables(s.csvBuff, s.label); } catch(e) {}
+        if (s.csvGearListing) {
+          try {
+            const gd = parseGearListing(s.csvGearListing);
+            Object.entries(gd).forEach(([n, slots]) => {
+              gearListingByPlayer[normalizeName(n)] = { label: s.label, slots };
+            });
+          } catch(e) {}
+        }
+      }
+    });
     _applyClaStoredParsed();
     return;
   }
@@ -4358,7 +4432,16 @@ async function fetchAllClaData() {
   const gearResults = [];        // { label, text }
   const gearListingResults = []; // { label, text, sheetIdx }
 
-  await Promise.all(claSheets.flatMap((sheet, sheetIdx) => [
+  // Parse paste-mode entries immediately (no fetch needed)
+  pasteSheets.forEach((sheet, idx) => {
+    try { parseGearIssues(sheet.csvGear, sheet.label); } catch(e) {}
+    try { parseBuffConsumables(sheet.csvBuff, sheet.label); } catch(e) {}
+    if (sheet.csvGearListing) {
+      gearListingResults.push({ label: sheet.label, text: sheet.csvGearListing, sheetIdx: claSheets.indexOf(sheet) });
+    }
+  });
+
+  await Promise.all(fetchSheets.flatMap((sheet, sheetIdx) => [
     fetchSheet(sheet.sheetId, sheet.gearGid)
       .then(text => gearResults.push({ label: sheet.label, text }))
       .catch(e => addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, e.message)),
@@ -4592,7 +4675,8 @@ async function loadGearItemIdsFromRepo() {
     if (cfg.guild_name)          GUILD_NAME           = cfg.guild_name;
     if (cfg.guild_subtitle)      GUILD_SUBTITLE       = cfg.guild_subtitle;
     if (cfg.page_title)          PAGE_TITLE           = cfg.page_title;
-    if (cfg.enable_wcl != null)  ENABLE_WCL           = !!cfg.enable_wcl;
+    if (cfg.enable_wcl != null)        ENABLE_WCL          = !!cfg.enable_wcl;
+    if (cfg.enable_apps_script != null) ENABLE_APPS_SCRIPT  = !!cfg.enable_apps_script;
     if (cfg.wcl_client_id)       WCL_CLIENT_ID        = cfg.wcl_client_id;
     if (cfg.wcl_realm)           WCL_REALM            = cfg.wcl_realm;
     if (cfg.wcl_zone_id)         WCL_ZONE_ID          = cfg.wcl_zone_id;
@@ -4608,7 +4692,14 @@ async function loadGearItemIdsFromRepo() {
     const wclSec = document.getElementById('wclSection');
     if (wclSec) wclSec.style.display = ENABLE_WCL ? '' : 'none';
     if (!ENABLE_WCL) document.body.classList.add('wcl-hidden');
-    console.log('config.json loaded — worker:', CF_WORKER_URL, '| WCL:', ENABLE_WCL);
+    // Toggle CLA form mode based on enable_apps_script
+    const claScript = document.getElementById('claScriptFields');
+    const claPaste = document.getElementById('claPasteFields');
+    if (claScript && claPaste) {
+      claScript.style.display = ENABLE_APPS_SCRIPT ? '' : 'none';
+      claPaste.style.display = ENABLE_APPS_SCRIPT ? 'none' : '';
+    }
+    console.log('config.json loaded — worker:', CF_WORKER_URL, '| WCL:', ENABLE_WCL, '| Apps Script:', ENABLE_APPS_SCRIPT);
   } catch(e) {
     console.warn('config.json not found or invalid — using defaults:', e.message);
   }
@@ -4722,6 +4813,13 @@ loadClaSheetsFromRepo().then(async () => {
     const token = await getWclToken();
     if (token) {
       fetchWclAllStars(WCL_REALM);
+    } else {
+      // No valid token — clear all WCL spinners so they don't hang
+      if (lastRenderData?.roles) {
+        lastRenderData.roles.flatMap(r => r.players).forEach(p => {
+          if (p.name) updateWclCell(normalizeName(p.name), null);
+        });
+      }
     }
   }
 });
