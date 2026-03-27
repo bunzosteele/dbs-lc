@@ -117,3 +117,8 @@ The realm name is the lowercase hyphenated version of your realm name as it appe
 **Icons not appearing**
 - Icons only load for items not already in `gear-item-ids.json`
 - If `enable_apps_script` is false, icons will not load for unknown items
+
+**WCL shows spinners but no data**
+- Verify the redirect URL in your WCL client matches your GitHub Pages URL exactly
+- Check that `wcl_realm` matches the realm slug on WarcraftLogs (check character URLs)
+- Try disconnecting and reconnecting via the button at the bottom of the sidebar
