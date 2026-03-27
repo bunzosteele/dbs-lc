@@ -1,6 +1,6 @@
 # Loot Council Dashboard — Setup Guide
 
-A TBC Classic loot council dashboard that tracks raid attendance, consumable usage, gear issues, BiS lists, and loot distribution to generate data-driven priority recommendations.
+A TBC Classic loot council dashboard that tracks raid attendance, consumable usage, gear issues, BiS lists, and loot distribution, and customizable prioritization, to generate data-driven priority recommendations.
 
 ---
 
@@ -8,9 +8,9 @@ A TBC Classic loot council dashboard that tracks raid attendance, consumable usa
 
 - FREE - A GitHub account (for hosting dashboard via GitHub Pages)
 - FREE - A Cloudflare account (for hosting data storage)
-- FREE - A Google account (for hosting apps scripts for data proxies)
-- FREE - Your guild's [CLAs](https://docs.google.com/spreadsheets/d/1TaL0zufIhSNhAVIfpsBXMT0JXL3ptpbA7vZnXCWOlBs/edit?gid=1843677088#gid=1843677088) Google Sheet IDs
+- FREE - Your guild's [CLA](https://docs.google.com/spreadsheets/d/1TaL0zufIhSNhAVIfpsBXMT0JXL3ptpbA7vZnXCWOlBs/edit?gid=1843677088#gid=1843677088) Google Sheets
 - *(Optional)* A WarcraftLogs account with API access
+- *(Optional)* FREE - A Google account (for hosting apps scripts for data proxies)
 
 ---
 
@@ -149,7 +149,7 @@ CLA (Combat Log Analytics) is the source of attendance, current gear, gear issue
 
 ---
 
-## 8. Populate Your Roster
+## 7. Populate Your Roster
 
 1. Navigate to the **Roster** tab (part of the Management dropdown, requires write token)
 2. Use the **Add Raider** form at the bottom to add each player with their role and class
@@ -157,7 +157,7 @@ CLA (Combat Log Analytics) is the source of attendance, current gear, gear issue
 
 ---
 
-## 9. Ongoing Maintenance
+## 8. Ongoing Maintenance
 
 ### After Each Raid
 
