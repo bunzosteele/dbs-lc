@@ -188,11 +188,6 @@ On the **Loot Log** tab items can be assigned to raiders. Alternatively the **+ 
 **CLA sheets fail to load (URL mode)**
 - See [APPS-SCRIPT.md](APPS-SCRIPT.md) for troubleshooting
 
-**WCL shows spinners but no data**
-- Verify the redirect URL in your WCL client matches your GitHub Pages URL exactly
-- Check that `wcl_realm` matches the realm slug on WarcraftLogs (check character URLs)
-- Try disconnecting and reconnecting via the button at the bottom of the sidebar
-
 **`migrateFromGitHub()` fails**
 - Make sure GitHub Pages has finished deploying (check the Actions tab in your repo)
 - Ensure your write token is saved in the dashboard before running the command
