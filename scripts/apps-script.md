@@ -78,7 +78,7 @@ Skip this section and set `"enable_wcl": false` in `config.json` if you don't wa
 
 ### Configure Your Apps Script for WCL
 
-If you deployed your own Apps Script project in Section 2, no additional steps are needed — the WCL handler is already included. Just set `enable_wcl: true` and add your `wcl_client_id` and `wcl_realm` to `config.json`.
+If you deployed your own Apps Script project already, no additional steps are needed — the WCL handler is already included. Just set `enable_wcl: true` and add your `wcl_client_id` and `wcl_realm` to `config.json`.
 
 ### Add WCL config to `config.json`
 
