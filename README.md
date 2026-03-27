@@ -26,7 +26,7 @@ A TBC Classic loot council dashboard that tracks raid attendance, consumable usa
 
 ## 2. Set Up the Google Apps Script Proxy *(Optional)*
 
-The Apps Script proxy enables fetching CLA data directly from Google Sheets by URL, and loading item icons from Wowhead. **This step is optional** — if you set `"enable_apps_script": false` in `config.json`, you can skip it entirely and paste CLA CSV data manually in the dashboard instead.
+The Apps Script proxy enables fetching CLA data directly from Google Sheets by URL, loading item icons from Wowhead, and fetching Warcraftlogs player data. **This step is optional** and requires a non-trivial amount of work. — if you leave `"enable_apps_script": false` in `config.json`, you can skip it entirely and paste CLA CSV data manually in the dashboard instead.
 
 If you want to enable Apps Script, see **[APPS-SCRIPT.md](APPS-SCRIPT.md)** for full setup instructions.
 
@@ -97,6 +97,7 @@ If you want WarcraftLogs integration (see Section 6), change "enable_wcl" to tru
   "wcl_client_id": "your-wcl-oauth-client-id",
   "wcl_realm": "your-realm-name"
 ```
+This also requires completion of the Apps Script set-up.
 
 Commit and push — GitHub Pages will redeploy automatically.
 
@@ -126,58 +127,9 @@ migrateFromGitHub()
    ...
    ```
 
-> **Tip:** You can also seed individual files without re-seeding everything. For example, to push just `set-bonuses.json`:
-> ```javascript
-> saveJsonToGitHub('set-bonuses.json', { /* your data */ })
-> ```
-
 ---
 
-## 6. Set Up WarcraftLogs Integration (Optional)
-
-Skip this section and set `"enable_wcl": false` in `config.json` if you don't want WCL performance data in the dashboard.
-
-### Create a WarcraftLogs API Client
-
-1. Go to [www.warcraftlogs.com/api/clients](https://www.warcraftlogs.com/api/clients)
-2. Click **Create Client**
-3. Fill in:
-   - **Name**: anything (e.g. "My LC Dashboard")
-   - **Redirect URL**: your GitHub Pages URL exactly, e.g. `https://yourusername.github.io/your-repo/`  
-     *(Must match exactly — no trailing slash issues)*
-4. Click **Create** and copy the **Client ID**
-
-### Configure Your Apps Script for WCL
-
-If you deployed your own Apps Script project in Section 2, no additional steps are needed — the WCL handler is already included. Just set `enable_wcl: true` and add your `wcl_client_id` and `wcl_realm` to `config.json`.
-
-### Add WCL config to `config.json`
-
-```json
-{
-  ...
-  "enable_wcl": true,
-  "wcl_client_id": "paste-your-client-id-here",
-  "wcl_realm": "your-realm-name",
-  "wcl_zone_id": 1048,
-  "wcl_game_slug": "tbc-classic"
-}
-```
-
-The realm name is the lowercase hyphenated version of your realm name as it appears in WarcraftLogs URLs, e.g. `area-52`, `nightslayer`, `dreamscythe`.
-
-`wcl_zone_id` controls which raid zone WCL rankings are pulled from. `1048` is Gruul's Lair / Magtheridon for TBC Classic Anniversary — update this as your guild progresses to SSC/TK (1004) or Hyjal/BT (1005). `wcl_game_slug` must match the game version on WarcraftLogs: `tbc-classic` for TBC Classic Anniversary, `classic` for Season of Discovery.
-
-### Connect in the Dashboard
-
-1. Open the dashboard — a **⚡ Connect WarcraftLogs** button appears at the bottom right
-2. Click it — you'll be redirected to WarcraftLogs to authorise
-3. After authorising, you'll be redirected back and the button changes to **⚡ Connected to WarcraftLogs**
-4. WCL performance data will now appear in the WCL column on all player tables
-
----
-
-## 7. Set Up CLA Sheets
+## 6. Set Up CLA Sheets
 
 CLA (Combat Log Analyser) is the source of attendance, current gear, gear issues, and consumable data.
 
