@@ -14,7 +14,8 @@
     "gear_modifier_weight": 0.1,
     "loot_mod_floor": 0.33,
     "loot_mod_ceiling": 1.0,
-    "alt_modifier_weight": 0.05
+    "alt_modifier_weight": 0.05,
+    "tenure_forgiveness_halflife": 8
   },
   "enable_wcl": true,
   "wcl_client_id": "a1577bef-44fb-4fb3-87f6-555c24400a38",
