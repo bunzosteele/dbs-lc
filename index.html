@@ -4277,7 +4277,13 @@ function removeCla(i) {
 
 // Apply stored parsed CLA data to in-memory globals
 function _applyClaStoredParsed() {
-  for (const [label, pd] of Object.entries(_claStoredParsed)) {
+  // Process in sheet order (chronological) so newer entries correctly overwrite older ones
+  const _sortedLabels = claSheets.map(s => s.label).filter(l => _claStoredParsed[l]);
+  const _remainingLabels = Object.keys(_claStoredParsed).filter(l => !_sortedLabels.includes(l));
+  for (const label of [..._sortedLabels, ..._remainingLabels]) {
+    const pd = _claStoredParsed[label];
+    if (!pd) continue;
+    {  // block to preserve original scoping
     // sheetDate
     if (pd.sheetDate) claSheetDates[label] = pd.sheetDate;
 
@@ -4329,8 +4335,8 @@ function _applyClaStoredParsed() {
       }
     }
 
-    // gearListing
-    if (pd.gearListing) {
+    // gearListing — only apply if this sheet had entries (skip empty/older sheets)
+    if (pd.gearListing && Object.keys(pd.gearListing).length > 0) {
       for (const [key, slots] of Object.entries(pd.gearListing)) {
         const existingLabel = gearListingByPlayer[key]?.label;
         const existingDate = existingLabel ? (claSheetDates[existingLabel] || null) : null;
@@ -4345,7 +4351,7 @@ function _applyClaStoredParsed() {
         if (isNewer) gearListingByPlayer[key] = { label, slots };
       }
     }
-  }
+  } // end for loop
   console.log('CLA cache applied:', Object.keys(claDataByPlayer).length, 'players,',
     Object.keys(gearListingByPlayer).length, 'gear listings,',
     Object.keys(buffScoreByPlayerDate).length, 'buff score players');
