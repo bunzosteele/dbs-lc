@@ -2908,6 +2908,7 @@ async function appsScriptFetch(url) {
 }
 
 async function fetchSheet(sheetId, gid) {
+  if (!APPS_SCRIPT) throw new Error('Apps Script URL not configured — set apps_script in config.json to fetch sheets by URL');
   const rawUrl = APPS_SCRIPT + '?sheetId=' + sheetId + '&gid=' + gid;
   const text = await appsScriptFetch(rawUrl);
   if (!text.trim() || !text.includes(',')) throw new Error('Response does not look like CSV');
@@ -4456,7 +4457,7 @@ async function fetchAllClaData() {
   canonicalNames = {};
 
   // Paste-mode entries already have parsed data stored — only fetch-mode entries need HTTP
-  const fetchSheets = ENABLE_APPS_SCRIPT ? claSheets.filter(s => s.sheetId) : [];
+  const fetchSheets = claSheets.filter(s => s.sheetId); // always fetch URL/GID sheets regardless of ENABLE_APPS_SCRIPT
   const pasteSheets = claSheets.filter(s => s.csvGear || s.csvBuff);
 
   // If all sheets are either cached or paste-mode, skip fetching entirely
