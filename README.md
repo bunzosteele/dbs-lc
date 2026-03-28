@@ -7,51 +7,53 @@ A TBC Classic loot council dashboard that tracks raid attendance, consumable usa
 ## Features
 
 ### Priority Scoring and Distribution Recommendations
-Data-driven loot priority recommendations that combine attendance, consumable usage, gear issues, loot history, and BiS upgrade value into a single normalized score. Fully configurable — each component can be individually enabled or disabled, and key weights are adjustable to match your guild's values.
+Data-driven loot priority recommendations that combine attendance, consumable usage, gear issues, loot history, and BiS upgrade value into a single normalized score. Recommendation includes reasoning behind individual's selection when singled out. All calculations easily visible through tooltips. Fully configurable — each component can be individually enabled or disabled, and key weights are adjustable to match your guild's values.
 
-> 📸 *<img width="918" height="406" alt="image" src="https://github.com/user-attachments/assets/80bd17da-3c1a-4eaf-81a0-1263e76adf63" />*
+> <img width="918" height="406" alt="image" src="https://github.com/user-attachments/assets/80bd17da-3c1a-4eaf-81a0-1263e76adf63" />
+> <img width="915" height="262" alt="image" src="https://github.com/user-attachments/assets/a344c031-6cbe-4b14-8eaa-232f14418cd6" />
+
 
 ---
 
 ### Raid Attendance Tracking
 Attendance is imported directly from CLA exports — either by pasting tab-separated data from Google Sheets or via URL if Apps Script is configured. Attendance percentages are displayed per-raid, and the Roster tab shows the full attendance history at a glance.
 
-> 📸 *<img width="914" height="582" alt="image" src="https://github.com/user-attachments/assets/e5e92955-bb87-4eb0-ba8a-6daed58107c8" />*
+> <img width="914" height="582" alt="image" src="https://github.com/user-attachments/assets/e5e92955-bb87-4eb0-ba8a-6daed58107c8" />
 
 ---
 
 ### Gear Issues & Consumables
 Per-player gear issues (missing gems, missing or suboptimal enchants) and consumable scores (flasks, food, weapon oils) are parsed from CLA data and reflected in priority scores. Issues are surfaced in tooltips so the loot council can see exactly what's dragging a player's score down.
 
-> 📸 *<img width="911" height="212" alt="image" src="https://github.com/user-attachments/assets/1137617c-2302-4daf-88d9-d6e945170426" />*
-> 📸 *<img width="922" height="318" alt="image" src="https://github.com/user-attachments/assets/fbb128a8-3539-4073-87b8-d46408c16c7d" />*
+> <img width="911" height="212" alt="image" src="https://github.com/user-attachments/assets/1137617c-2302-4daf-88d9-d6e945170426" />
+> <img width="922" height="318" alt="image" src="https://github.com/user-attachments/assets/fbb128a8-3539-4073-87b8-d46408c16c7d" />
 
 ---
 
 ### Loot Distribution & Loot Log
 A full loot history log tracks every item assigned to every raider across all raids. The Loot Distribution tab shows items grouped by raid and boss, and the + LOG button lets officers quickly assign loot during a raid night.
 
-> 📸 *<img width="909" height="667" alt="image" src="https://github.com/user-attachments/assets/9771ef96-975b-4fd6-bf73-f174d9145114" />*
-> 📸 *<img width="913" height="321" alt="image" src="https://github.com/user-attachments/assets/8fc00059-b476-4dda-b19d-834dbd698798" />*
+> <img width="909" height="667" alt="image" src="https://github.com/user-attachments/assets/9771ef96-975b-4fd6-bf73-f174d9145114" />
+> <img width="913" height="321" alt="image" src="https://github.com/user-attachments/assets/8fc00059-b476-4dda-b19d-834dbd698798" />
 
 ---
 
 ### Item Glossary & Prioritization
 Every item in the loot table can be configured with custom prioritization multipliers targeting specific roles, classes, or individuals. Tier token set bonus multipliers are also configurable to reward players who are one piece away from a set threshold.
 
-> 📸 *<img width="917" height="1182" alt="image" src="https://github.com/user-attachments/assets/2fbd7218-90e0-4fba-a90a-6b4288a6168c" />*
+> <img width="917" height="1182" alt="image" src="https://github.com/user-attachments/assets/2fbd7218-90e0-4fba-a90a-6b4288a6168c" />
 
 ---
 
 ### BiS Lists & EPV
 Best-in-slot lists with Equivalence Point Values power the BiS upgrade modifier, which automatically boosts priority for players who would gain a significant upgrade and reduces it for players receiving a downgrade or sidegrade. EPV values are formula-driven but fully overridable per item per spec.
 
-> 📸 *<img width="923" height="767" alt="image" src="https://github.com/user-attachments/assets/7a44a476-05ff-4681-a1a2-948d882e9e3f" />*
+> <img width="923" height="767" alt="image" src="https://github.com/user-attachments/assets/7a44a476-05ff-4681-a1a2-948d882e9e3f" />
 
 ### Raid Overview
 Raid overview screen allows you to track overall raider status by role and tier token. Warcraftlogs integration supported to easily view parse data alongside other metrics. 
 
-> 📸 *<img width="929" height="616" alt="image" src="https://github.com/user-attachments/assets/eb095365-9180-4159-9cdb-6dad0a4f0106" />*
+> <img width="929" height="616" alt="image" src="https://github.com/user-attachments/assets/eb095365-9180-4159-9cdb-6dad0a4f0106" />
 
 ---
 
