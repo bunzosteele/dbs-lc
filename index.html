@@ -4341,6 +4341,7 @@ function _applyClaStoredParsed() {
     }
 
     // gearListing — only apply if this sheet had entries (skip empty/older sheets)
+    console.log(`[apply] label="${label}" stored gearListing players: ${Object.keys(pd.gearListing||{}).length}`);
     if (pd.gearListing && Object.keys(pd.gearListing).length > 0) {
       for (const [key, slots] of Object.entries(pd.gearListing)) {
         const existingLabel = gearListingByPlayer[key]?.label;
@@ -4418,6 +4419,7 @@ function _storeParsedClaData() {
     for (const [key, data] of Object.entries(gearListingByPlayer)) {
       if (data.label === label) gearListing[key] = data.slots;
     }
+    console.log(`[store] label="${label}" gearListing players: ${Object.keys(gearListing).length} / gearListingByPlayer total: ${Object.keys(gearListingByPlayer).length}`);
 
     // CLA presence
     const claPresence = [...(claPlayersByLabel[label] || [])];
@@ -4455,6 +4457,7 @@ async function fetchAllClaData() {
   const allHandled = claSheets.length > 0 && claSheets.every(s =>
     _claStoredParsed[s.label] || s.csvGear
   );
+  console.log('[fetchAllClaData] allHandled:', allHandled, '| fetchSheets:', fetchSheets.length, '| pasteSheets:', pasteSheets.length, '| cached:', claSheets.filter(s => _claStoredParsed[s.label]).length);
   if (allHandled) {
     console.log('Loading CLA data from cache/paste (' + claSheets.length + ' sheets)');
     // Apply paste-mode entries directly
