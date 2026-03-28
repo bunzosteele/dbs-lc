@@ -4,7 +4,7 @@
   "page_title": "DBS LC",
   "cf_worker_url": "https://dbs-lc.steelead24.workers.dev",
   "apps_script": "https://script.google.com/macros/s/AKfycbz4PHAAzCBbp7uuprvoeQKhCJGrmjT9Zgszw-EymFI-8vT-fjGgMSdfCzsF2Nt0Gk1A/exec",
-  "enable_apps_script": false,
+  "enable_apps_script": true,
   "formula": {
     "use_effective_attendance": true,
     "use_consume_modifier": true,
