@@ -7039,7 +7039,6 @@ async function migrateFromGitHub() {
     'loot-distribution.json', 'bis-data.json', 'gear-item-ids.json',
     'set-bonuses.json', 'cla-sheets.json',
   ];
-  if (btn) { btn.textContent = 'Seeding…'; btn.disabled = true; }
   const results = [];
   for (const file of files) {
     try {
