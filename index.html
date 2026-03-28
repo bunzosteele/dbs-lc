@@ -4280,11 +4280,17 @@ function _applyClaStoredParsed() {
   // Process in sheet order (chronological) so newer entries correctly overwrite older ones
   const _sortedLabels = claSheets.map(s => s.label).filter(l => _claStoredParsed[l]);
   const _remainingLabels = Object.keys(_claStoredParsed).filter(l => !_sortedLabels.includes(l));
-  for (const label of [..._sortedLabels, ..._remainingLabels]) {
+  const _allLabels = [..._sortedLabels, ..._remainingLabels];
+
+  // Pre-populate ALL sheet dates before any recency comparisons so they're available
+  for (const label of _allLabels) {
+    const pd = _claStoredParsed[label];
+    if (pd?.sheetDate) claSheetDates[label] = pd.sheetDate;
+  }
+
+  for (const label of _allLabels) {
     const pd = _claStoredParsed[label];
     if (!pd) continue;
-    // sheetDate
-    if (pd.sheetDate) claSheetDates[label] = pd.sheetDate;
 
     // claPresence
     if (pd.claPresence) {
