@@ -4283,7 +4283,6 @@ function _applyClaStoredParsed() {
   for (const label of [..._sortedLabels, ..._remainingLabels]) {
     const pd = _claStoredParsed[label];
     if (!pd) continue;
-    {  // block to preserve original scoping
     // sheetDate
     if (pd.sheetDate) claSheetDates[label] = pd.sheetDate;
 
