@@ -4077,7 +4077,7 @@ function renderClaList() {
   list.innerHTML = claSheets.map((s, i) => `
     <div class="cla-row">
       <span class="cla-row-label">${s.label}</span>
-      <span class="cla-row-url" title="${s.url}">${s.url.substring(0, 60)}...</span>
+      <span class="cla-row-url" title="${s.url || ''}">${s.url ? s.url.substring(0, 60) + '...' : '(pasted CSV)'}</span>
       <span class="cla-row-gids">${s.sheetId
         ? `Issues: ${s.gearGid} / Gear: ${s.gearListingGid || '—'} / Consumes: ${s.buffGid}`
         : `Paste mode${s.csvGearListing ? ' (with gear listing)' : ''}`}</span>
@@ -6996,7 +6996,7 @@ async function bisAddItem() {
 
 // ── One-time migration: seed Worker KV from GitHub Pages JSON files ──────
 async function migrateFromGitHub() {
-  if (!CF_WORKER_URL) { alert('CF_WORKER_URL not set in source.'); return; }
+  if (!CF_WORKER_URL) { alert('CF_WORKER_URL is not set — check that config.json loaded correctly (open the browser console for errors).'); return; }
   if (!writeToken) { alert('Write token required.'); return; }
   if (!confirm('This will overwrite all Worker KV data with the current GitHub Pages JSON files.\n\nThis should only be done once during initial setup. Continue?')) return;
   const files = [
