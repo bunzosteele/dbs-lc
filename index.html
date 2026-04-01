@@ -4292,7 +4292,7 @@ function _applyClaStoredParsed() {
   // Pre-populate ALL sheet dates before any recency comparisons so they're available
   for (const label of _allLabels) {
     const pd = _claStoredParsed[label];
-    if (pd?.sheetDate) claSheetDates[label] = pd.sheetDate;
+    if (pd?.sheetDate) claSheetDates[label] = pd.sheetDate instanceof Date ? pd.sheetDate : new Date(pd.sheetDate);
   }
 
   for (const label of _allLabels) {
@@ -7047,7 +7047,7 @@ async function migrateFromGitHub() {
       if (!res.ok) { results.push(`${file}: not found (skipped)`); continue; }
       const text = await res.text();
       JSON.parse(text); // validate
-      const put = await fetch(`${CF_WORKER_URL}/${file}`, {
+      const put = await fetch(`${_workerBase()}/${file}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'X-Token': writeToken },
         body: text,
