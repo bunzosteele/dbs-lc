@@ -8039,11 +8039,23 @@ function onItemChange() {
     // Primary: check stored slot in gearItemIds
     const normItem = normalizeName(itemName);
     const entry = gearItemIds[normItem];
+    // For token/quest items (slot 'Quest' or no WOWHEAD_SLOT_MAP match),
+    // resolve to the reward item's slot using TOKEN_REWARDS
     if (entry && typeof entry === 'object' && entry.slot) {
-      // Shields share Wowhead slot 'Off Hand' but should only map to ['Off-Hand']
       if (entry.slot === 'Off Hand' && entry.icon && entry.icon.startsWith('inv_shield')) return ['Off-Hand'];
       const mapped = WOWHEAD_SLOT_MAP[entry.slot];
       if (mapped) return mapped;
+      // slot didn't map (e.g. 'Quest') — try resolving via TOKEN_REWARDS
+      const rawId = typeof entry === 'object' ? entry.id : entry;
+      if (rawId && TOKEN_REWARDS[rawId]) {
+        // Get any reward item id and look up its slot
+        const anyRewardId = Object.values(TOKEN_REWARDS[rawId])[0];
+        const rewardEntry = Object.values(gearItemIds).find(v => typeof v === 'object' && v.id === anyRewardId);
+        if (rewardEntry?.slot) {
+          const rewardMapped = WOWHEAD_SLOT_MAP[rewardEntry.slot] || [rewardEntry.slot];
+          if (rewardMapped) return rewardMapped;
+        }
+      }
     }
 
     // Secondary: find slot by scanning player gear listings
