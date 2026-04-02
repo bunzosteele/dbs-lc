@@ -3375,18 +3375,34 @@ function calculatePriority(p, bottom20threshold, top20threshold, pointValues) {
   const lootMod = FORMULA_LOOT_MOD_CEILING - lootPercentile * lootRange;
   const lootTier = `Loot percentile ${(lootPercentile*100).toFixed(0)}% → ×${lootMod.toFixed(3)}`;
 
-  const score = attScore * consumeMod * gearMod * lootMod;
+  // --- Updated Logic for Alt Penalty ---
+  let score = attScore * consumeMod * gearMod * lootMod;
+
+  // Find the player in the roster to check if they are an alt
+  // rosterData.players is the array where we saved the isAlt flag in Step 2
+  const playerInfo = rosterData.players.find(rp => normalizeName(rp.name) === normalizeName(p.name));
+  const isAlt = playerInfo && playerInfo.isAlt === true;
+
+  if (isAlt) {
+    score = score * 0.5; // Apply the 50% penalty
+  }
 
   const tooltipParts = [
     `Attendance: floor(${effPct.toFixed(1)}%/10)×log(${p.attended}) = ${attScore.toFixed(2)}${FORMULA_USE_EFFECTIVE_ATTENDANCE ? ' (eff)' : ''}`,
   ];
+  
   if (FORMULA_USE_CONSUME_MOD) tooltipParts.push(`Consume mod: 1/(1+${missingConsume.toFixed(1)}%) = ×${consumeMod.toFixed(3)} (adj)`);
   if (FORMULA_USE_GEAR_MOD)    tooltipParts.push(`Gear mod: 1/(1+${FORMULA_GEAR_MOD_WEIGHT}×${gearIssueCount}) = ×${gearMod.toFixed(3)}`);
   tooltipParts.push(`Loot mod: ${lootTier}`);
+  
+  // Add a line to the tooltip so you know why the score is lower
+  if (isAlt) {
+    tooltipParts.push(`Alt Penalty: ×0.500`);
+  }
 
   return { score, tooltip: tooltipParts.join('&#10;') };
 }
-
+  
 function groupPlayers(allPlayers) {
   if (groupingMode === 'role') return lastRenderData.roles;
 
@@ -3764,12 +3780,13 @@ function buildTierProgressHtml(playerName) {
 
 
 
-function rosterUpdatePlayer(name, newRole, newClass) {
-  const p = rosterData.players.find(p => p.name === name);
+async function rosterUpdatePlayer(playerName, newRole, newClass, isAlt) {
+  const p = rosterData.players.find(p => normalizeName(p.name) === normalizeName(playerName));
   if (!p) return;
   p.role = newRole;
   p.class = newClass;
-  saveRosterToGitHub();
+  p.isAlt = isAlt;
+  await saveRosterToGitHub();
   // Re-render attendance so colors/role grouping update
   if (groupingMode === 'attendance') renderAttendancePanel();
 }
@@ -3900,31 +3917,41 @@ function toggleLoot(td, playerName) {
   // Tier set progress section
   html += buildTierProgressHtml(playerName);
 
-  // Role / Class edit section (only on the Roster tab when write token present)
+// Role / Class / Alt edit section (only on the Roster/Attendance tab when write token present)
   if (writeToken && groupingMode === 'attendance') {
     const _p = rosterData.players.find(p => normalizeName(p.name) === normalizeName(playerName));
     if (_p) {
       const _allRoles = ['Tanks','Physical DPS','Ranged DPS','Healers'];
       const _roleOpts = _allRoles.map(r => `<option value="${r}" ${r===_p.role?'selected':''}>${r}</option>`).join('');
       const _classOpts = (ROLE_CLASSES[_p.role]||[]).map(c => `<option value="${c}" ${c===_p.class?'selected':''}>${c}</option>`).join('');
+      
       html += `<div class="expand-section-title" style="margin-top:12px;">Edit Player</div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;">
           <select id="editRole_${normalizeName(playerName)}" onchange="
             var r=this.value;
             var cs=document.getElementById('editClass_${normalizeName(playerName)}');
-            cs.innerHTML=(ROLE_CLASSES[r]||[]).map(c=>'<option value=\''+c+'\'>'+c+'</option>').join('');
+            cs.innerHTML=(ROLE_CLASSES[r]||[]).map(c=>'<option value=\\'+c+'\\'>'+c+'</option>').join('');
           " style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:13px;">
             ${_roleOpts}
           </select>
           <select id="editClass_${normalizeName(playerName)}" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:13px;">
             ${_classOpts}
           </select>
+          
+          <div style="display:flex;align-items:center;gap:6px;padding:0 4px;">
+            <label style="font-size:11px;color:var(--text-dim);">Alt?</label>
+            <input type="checkbox" id="editAlt_${normalizeName(playerName)}" ${_p.isAlt ? 'checked' : ''} 
+                   style="width:15px;height:15px;cursor:pointer;accent-color:var(--gold-dim);">
+          </div>
+
           <button onclick="
             var r=document.getElementById('editRole_${normalizeName(playerName)}').value;
             var c=document.getElementById('editClass_${normalizeName(playerName)}').value;
-            rosterUpdatePlayer('${playerName.replace(/'/g,"\\'")}',r,c);
+            var a=document.getElementById('editAlt_${normalizeName(playerName)}').checked;
+            rosterUpdatePlayer('${playerName.replace(/'/g,"\\\\'")}', r, c, a);
           " style="background:var(--gold-dim);border:none;color:var(--bg);padding:5px 12px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;">SAVE</button>
-          <button onclick="if(confirm('Remove ${playerName.replace(/'/g,"\\'")} from roster?'))rosterRemovePlayer('${playerName.replace(/'/g,"\\'")}');" style="background:none;border:1px solid var(--border);color:var(--text-dim);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Remove from Roster</button>
+          
+          <button onclick="if(confirm('Remove ${playerName.replace(/'/g,"\\\\'")} from roster?'))rosterRemovePlayer('${playerName.replace(/'/g,"\\\\'")}');" style="background:none;border:1px solid var(--border);color:var(--text-dim);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Remove</button>
         </div>`;
     }
   }
@@ -5589,6 +5616,10 @@ function renderAttendancePanel() {
                 <option value="">— Select role first —</option>
               </select>
             </div>
+            <div style="display:flex;flex-direction:column;gap:4px;align-items:center;padding:0 8px;">
+              <label style="font-size:11px;color:var(--text-dim);">Alt?</label>
+              <input type="checkbox" id="rosterAddIsAlt" class="write-gated" style="width:16px;height:16px;cursor:pointer;accent-color:var(--gold-dim);">
+            </div>
             <button id="rosterAddBtn" class="gloss-btn-saveable write-gated" onclick="rosterAddPlayer()" style="background:var(--gold-dim);border:none;color:var(--bg);padding:7px 16px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.1em;transition:background 0.15s,box-shadow 0.15s;">ADD</button>
           </div>
         </div>
@@ -6335,7 +6366,6 @@ function renderRosterPanel() {
   panel.innerHTML = `
     <div style="max-width:900px;margin:0 auto;padding:0 16px;">
 
-      <!-- Header + filters -->
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
         <div style="font-family:'Cinzel',serif;font-size:16px;letter-spacing:0.15em;color:var(--gold);">ROSTER</div>
         <select id="rosterFilterRole" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px;" onchange="rosterApplyFilter()">
@@ -6349,13 +6379,13 @@ function renderRosterPanel() {
         <span style="color:var(--text-dim);font-size:13px;margin-left:auto;">${filtered.length} of ${rosterData.players.length} raiders</span>
       </div>
 
-      <!-- Roster table -->
       <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
         <thead>
           <tr style="border-bottom:1px solid var(--border);">
             <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">PLAYER</th>
             <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">ROLE</th>
             <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">CLASS</th>
+            <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">TYPE</th>
             <th style="padding:6px 12px;"></th>
           </tr>
         </thead>
@@ -6364,7 +6394,15 @@ function renderRosterPanel() {
             <tr style="border-bottom:1px solid var(--border)20;">
               <td style="padding:7px 12px;color:${CLASS_COLORS[p.class]||'var(--text)'};font-weight:600;">${p.name}</td>
               <td style="padding:7px 12px;color:var(--text-dim);font-size:13px;">${ROLE_ICONS[p.role]||''} ${p.role}</td>
-              <td style="padding:7px 12px;font-size:13px;${classStyle(p.class)}">${p.class}</td>
+              <td style="padding:7px 12px;font-size:13px;${classStyle(p.class)}">${p.class}</td><td style="padding:7px 12px;font-size:11px;color:var(--text-dim);letter-spacing:0.05em;">
+                <div style="display:flex; align-items:center; gap:8px;">
+                  <input type="checkbox" ${p.isAlt ? 'checked' : ''} 
+                         onchange="rosterToggleAlt('${p.name}', this.checked)" 
+                         class="write-gated" 
+                         style="cursor:pointer; width:14px; height:14px; accent-color:var(--gold-dim);">
+                  <span style="${p.isAlt ? 'color:var(--gold-dim)' : ''}">${p.isAlt ? 'ALT' : 'MAIN'}</span>
+                </div>
+              </td>
               <td style="padding:7px 12px;text-align:right;">
                 <button class="write-gated" onclick="rosterRemovePlayer('${p.name}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;padding:2px 6px;" title="Remove from roster">✕</button>
               </td>
@@ -6372,7 +6410,6 @@ function renderRosterPanel() {
         </tbody>
       </table>
 
-      <!-- Add new player -->
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:24px;">
         <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:12px;">ADD RAIDER</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
@@ -6393,12 +6430,15 @@ function renderRosterPanel() {
               <option value="">— Select role first —</option>
             </select>
           </div>
+          <div style="display:flex;flex-direction:column;gap:4px;align-items:center;padding:0 8px;">
+            <label style="font-size:11px;color:var(--text-dim);">Alt?</label>
+            <input type="checkbox" id="rosterAddIsAlt" class="write-gated" style="width:16px;height:16px;cursor:pointer;accent-color:var(--gold-dim);">
+          </div>
           <button id="rosterAddBtn" class="gloss-btn-saveable write-gated" onclick="rosterAddPlayer()" style="background:var(--gold-dim);border:none;color:var(--bg);padding:7px 16px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.1em;transition:background 0.15s,box-shadow 0.15s;">ADD</button>
         </div>
       </div>
 
       ${recommendations.length ? `
-      <!-- Recommendations from CLA -->
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;">
         <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:4px;">SEEN IN CLA — NOT ON ROSTER</div>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">These players appear in CLA exports but are not on the roster. Click ✕ to permanently exclude them.</div>
@@ -6413,6 +6453,26 @@ function renderRosterPanel() {
 
     </div>
   `;
+}
+
+  async function rosterToggleAlt(playerName, isChecked) {
+  // 1. Find the player in your rosterData object
+  const player = rosterData.players.find(p => normalizeName(p.name) === normalizeName(playerName));
+  
+  if (player) {
+    // 2. Update the value
+    player.isAlt = isChecked;
+    
+    // 3. Save the updated roster back to GitHub/Worker
+    await saveRosterToGitHub();
+    
+    // 4. Re-run the dashboard math so priority updates immediately
+    rebuildClassMap();
+    renderRosterPanel();
+    
+    // Optional: show a small toast or hint that it saved
+    if (window.setHint) setHint(`Updated ${playerName} to ${isChecked ? 'Alt' : 'Main'}`, 'success');
+  }
 }
 
 function rosterApplyFilter() {
@@ -6453,17 +6513,33 @@ function rosterAddPlayer() {
   const name  = document.getElementById('rosterAddName')?.value?.trim();
   const role  = document.getElementById('rosterAddRole')?.value;
   const cls   = document.getElementById('rosterAddClass')?.value;
+  // NEW: Capture the checkbox state
+  const isAlt = document.getElementById('rosterAddIsAlt')?.checked || false;
+
   if (!name || !role || !cls) {
     alert('Please fill in all fields.');
     return;
   }
+  
   if (rosterData.players.some(p => normalizeName(p.name) === normalizeName(name))) {
     alert(`${name} is already on the roster.`);
     return;
   }
-  // Remove from excluded if present
+
   rosterData.excluded = (rosterData.excluded || []).filter(n => normalizeName(n) !== normalizeName(name));
-  rosterData.players.push({ name, role, class: cls });
+  
+  // UPDATED: Include isAlt in the player object
+  rosterData.players.push({ 
+    name, 
+    role, 
+    class: cls, 
+    isAlt: isAlt 
+  });
+  
+  // NEW: Reset the checkbox and fields
+  document.getElementById('rosterAddIsAlt').checked = false;
+  document.getElementById('rosterAddName').value = '';
+
   rebuildClassMap();
   saveRosterToGitHub();
   renderRosterPanel();
@@ -6552,6 +6628,18 @@ const TOKEN_REWARDS = {
 
   // Magtheridon's Head (Finger) — id:32385
   32385: {Heal:28790, Tank:28792, Ret:28791, Prot:28792, Fury:28791, Arms:28791, Bear:28791, Cat:28791, Owl:28793, Tree:28790, Holy:28790, Shad:28793, Ele:28793, Enh:28791, Resto:28790, Arc:28793, Fire:28793, Aff:28793, Dest:28793, Rog:28791, BM:28791, SV:28791},
+
+  // Verdant Sphere (Neck) — id:32405 — quest reward from Nightbane (Karazhan)
+  // The Darkener's Grasp (30007)  — all tanks
+  // The Sun King's Talisman (30015) — ranged DPS except hunters (Arc, Fire, Ele, Aff, Dest, Shad, Owl)
+  // Telonicus's Pendant of Mayhem (30017) — physical DPS + hunters
+  // Lord Sanguinar's Claim (30018) — all healers
+  32405: {
+    Tank:30007, Prot:30007, Bear:30007,
+    Arc:30015, Fire:30015, Ele:30015, Aff:30015, Dest:30015, Shad:30015, Owl:30015,
+    Fury:30017, Arms:30017, Rog:30017, Ret:30017, Enh:30017, Cat:30017, BM:30017, SV:30017,
+    Heal:30018, Holy:30018, Tree:30018, Resto:30018,
+  },
 
   // ── T5 Vanquished tokens ─────────────────────────────────────────────────
   // Champion = Paladin (Crystalforge) + Rogue (Deathmantle) + Shaman (Cataclysm)
