@@ -1930,6 +1930,7 @@ function rebuildAttendanceFromCla() {
   );
 
   // Ensure each date exists in attendanceData.raids
+  console.log('[rebuildAttendance] CLA dates:', Object.fromEntries(sortedLabels.map(l => [l, formatAttendanceDate(claRaidDates[l])])));
   let changed = false;
   for (const label of sortedLabels) {
     const date = claRaidDates[label];
@@ -5727,7 +5728,6 @@ function attendanceDeleteRaid(dateStr) {
     }
   }
   saveAttendanceToGitHub();
-  rebuildAttendanceFromCla();
   renderAttendancePanel();
 }
 
