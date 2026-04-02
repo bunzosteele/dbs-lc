@@ -4669,8 +4669,17 @@ function parseBuffConsumables(text, label) {
   // C3 (row index 2, col index 2) contains the raid date for this CLA
   const dateStr = rows[2]?.[2]?.trim();
   if (dateStr) {
-    const parsed = new Date(dateStr);
-    if (!isNaN(parsed)) claSheetDates[label] = parsed;
+    // Parse the CLA date string as MST wall time:
+    // Treat it as UTC first (no browser TZ shift), then add 7h so mstDateParts
+    // (which subtracts 7h) returns the original wall-clock date correctly.
+    const parsedUtc = new Date(dateStr + ' UTC');
+    if (!isNaN(parsedUtc)) {
+      claSheetDates[label] = new Date(parsedUtc.getTime() + 7 * 60 * 60 * 1000);
+    } else {
+      // Fallback for other date formats
+      const parsed = new Date(dateStr);
+      if (!isNaN(parsed)) claSheetDates[label] = parsed;
+    }
   }
   // Header row is row index 4 (0-based), data starts at row 5
   const headers = rows[4]?.slice(2) || []; // col C onwards
