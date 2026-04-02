@@ -4673,14 +4673,19 @@ function parseBuffConsumables(text, label) {
   const dateStr = rows[2]?.[2]?.trim();
   if (dateStr) {
     // CLA date format: "February 25, 2026 02:18:57"
-    // We only care about the date portion — strip the time entirely before parsing
-    // to avoid any timezone-driven day shifts regardless of where the browser is.
-    // Match "Month Day, Year" at the start of the string
-    const dateOnly = dateStr.replace(/\s+\d{1,2}:\d{2}:\d{2}.*$/, '').trim();
-    const parsed = new Date(dateOnly + ' UTC'); // parse as UTC — no local TZ involved
-    if (!isNaN(parsed)) {
-      // Store as noon UTC so mstDateParts (UTC-7) → 5am same day, always correct
-      claSheetDates[label] = new Date(parsed.getTime() + 12 * 60 * 60 * 1000);
+    // Manually parse to avoid ALL browser timezone interpretation.
+    // Extract month name, day, year directly via regex — ignore time entirely.
+    const MONTH_NAMES = ['january','february','march','april','may','june',
+                         'july','august','september','october','november','december'];
+    const m = dateStr.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
+    if (m) {
+      const monthIdx = MONTH_NAMES.indexOf(m[1].toLowerCase());
+      const day = parseInt(m[2], 10);
+      const year = parseInt(m[3], 10);
+      if (monthIdx !== -1 && day && year) {
+        // Store as noon UTC on the exact calendar date — no TZ math involved at all
+        claSheetDates[label] = new Date(Date.UTC(year, monthIdx, day, 12, 0, 0));
+      }
     }
   }
   // Header row is row index 4 (0-based), data starts at row 5
