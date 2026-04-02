@@ -7824,8 +7824,12 @@ function onItemChange() {
 
     // Get current item(s) in relevant slots — inline slot lookup to avoid TDZ
     const gear = gearListingByPlayer[key]?.slots;
+    // For token items (e.g. Verdant Sphere, Magtheridon's Head), use the resolved reward item's
+    // slot — the token itself has no equip slot. Fall back to the raw candidate if no token reward.
+    const _effectiveIdForSlot = _candidateItemId !== _rawCandidateId ? _candidateItemId : _rawCandidateId;
     const _entry = gearItemIds[normalizeName(item)] || Object.values(gearItemIds).find(v => typeof v === 'object' && v.id === _rawCandidateId);
-    const _entrySlot = _entry && typeof _entry === 'object' ? _entry.slot : null;
+    const _rewardEntry = Object.values(gearItemIds).find(v => typeof v === 'object' && v.id === _effectiveIdForSlot);
+    const _entrySlot = (_rewardEntry?.slot) || (_entry && typeof _entry === 'object' ? _entry.slot : null);
     const _SLOT_MAP = {
       'Head': ['Head'], 'Neck': ['Neck'], 'Shoulder': ['Shoulders'],
       'Back': ['Cloak'], 'Chest': ['Chest'], 'Wrist': ['Bracers'],
