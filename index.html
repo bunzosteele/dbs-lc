@@ -1935,6 +1935,8 @@ function rebuildAttendanceFromCla() {
   for (const label of sortedLabels) {
     const date = claRaidDates[label];
     const dateStr = formatAttendanceDate(date);
+    const _deleted = attendanceData.deletedDates || [];
+    if (_deleted.includes(dateStr)) continue; // manually deleted, don't re-add
     if (!attendanceData.raids.find(r => r.date === dateStr)) {
       attendanceData.raids.push({ date: dateStr, label: formatRaidLabel(date) });
       changed = true;
@@ -4670,16 +4672,19 @@ function parseBuffConsumables(text, label) {
   // C3 (row index 2, col index 2) contains the raid date for this CLA
   const dateStr = rows[2]?.[2]?.trim();
   if (dateStr) {
-    // Parse the CLA date string as MST wall time:
-    // Treat it as UTC first (no browser TZ shift), then add 7h so mstDateParts
-    // (which subtracts 7h) returns the original wall-clock date correctly.
-    const parsedUtc = new Date(dateStr + ' UTC');
-    if (!isNaN(parsedUtc)) {
-      claSheetDates[label] = new Date(parsedUtc.getTime() + 7 * 60 * 60 * 1000);
-    } else {
-      // Fallback for other date formats
-      const parsed = new Date(dateStr);
-      if (!isNaN(parsed)) claSheetDates[label] = parsed;
+    // CLA date format: "February 25, 2026 02:18:57" — we only want the date portion.
+    // Parse with Date but then reconstruct as noon UTC so mstDateParts (UTC-7) gives
+    // the same calendar date regardless of browser timezone.
+    // Strategy: extract year/month/day via a UTC-anchored Date, ignoring the time.
+    const parsed = new Date(dateStr);
+    if (!isNaN(parsed)) {
+      // Use the wall-clock date components directly to build a noon-UTC Date
+      // so mstDateParts returns the same date in any timezone
+      const y = parsed.getFullYear();
+      const m = parsed.getMonth();
+      const d = parsed.getDate();
+      // Store as noon UTC on that calendar date — mstDateParts subtracts 7h → 5am MST, same day
+      claSheetDates[label] = new Date(Date.UTC(y, m, d, 12, 0, 0));
     }
   }
   // Header row is row index 4 (0-based), data starts at row 5
@@ -5721,6 +5726,9 @@ function attendanceDeleteRaid(dateStr) {
   if (!raid) return;
   if (!confirm(`Delete raid "${raid.label}" (${dateStr}) and all its attendance data?\n\nThis cannot be undone.`)) return;
   attendanceData.raids = attendanceData.raids.filter(r => r.date !== dateStr);
+  // Record as manually deleted so rebuildAttendanceFromCla won't re-add it
+  if (!attendanceData.deletedDates) attendanceData.deletedDates = [];
+  if (!attendanceData.deletedDates.includes(dateStr)) attendanceData.deletedDates.push(dateStr);
   // Also clear any overrides for this date
   for (const key of Object.keys(attendanceData.overrides || {})) {
     if (attendanceData.overrides[key][dateStr] !== undefined) {
