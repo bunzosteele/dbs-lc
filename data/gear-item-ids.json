@@ -19084,5 +19084,35 @@
     "name": "Cyclone War-Kilt",
     "slot": "Legs",
     "icon": "inv_pants_mail_12"
+  },
+  "verdantsphere": {
+    "id": 32405,
+    "icon": "inv_misc_orb_04",
+    "slot": "Neck",
+    "name": "Verdant Sphere"
+  },
+  "thedarkenersgrasp": {
+    "id": 30007,
+    "icon": "inv_jewelry_necklace_ahnqiraj_04",
+    "slot": "Neck",
+    "name": "The Darkener's Grasp"
+  },
+  "thesunkingstalisman": {
+    "id": 30015,
+    "icon": "inv_jewelry_necklace_14",
+    "slot": "Neck",
+    "name": "The Sun King's Talisman"
+  },
+  "telonicospendantofmayhem": {
+    "id": 30017,
+    "icon": "inv_jewelry_necklace_30naxxramas",
+    "slot": "Neck",
+    "name": "Telonico's Pendant of Mayhem"
+  },
+  "lordsanguinarsclaim": {
+    "id": 30018,
+    "icon": "inv_jewelry_necklace_29naxxramas",
+    "slot": "Neck",
+    "name": "Lord Sanguinar's Claim"
   }
 }
