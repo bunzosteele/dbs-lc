@@ -4672,19 +4672,15 @@ function parseBuffConsumables(text, label) {
   // C3 (row index 2, col index 2) contains the raid date for this CLA
   const dateStr = rows[2]?.[2]?.trim();
   if (dateStr) {
-    // CLA date format: "February 25, 2026 02:18:57" — we only want the date portion.
-    // Parse with Date but then reconstruct as noon UTC so mstDateParts (UTC-7) gives
-    // the same calendar date regardless of browser timezone.
-    // Strategy: extract year/month/day via a UTC-anchored Date, ignoring the time.
-    const parsed = new Date(dateStr);
+    // CLA date format: "February 25, 2026 02:18:57"
+    // We only care about the date portion — strip the time entirely before parsing
+    // to avoid any timezone-driven day shifts regardless of where the browser is.
+    // Match "Month Day, Year" at the start of the string
+    const dateOnly = dateStr.replace(/\s+\d{1,2}:\d{2}:\d{2}.*$/, '').trim();
+    const parsed = new Date(dateOnly + ' UTC'); // parse as UTC — no local TZ involved
     if (!isNaN(parsed)) {
-      // Use the wall-clock date components directly to build a noon-UTC Date
-      // so mstDateParts returns the same date in any timezone
-      const y = parsed.getFullYear();
-      const m = parsed.getMonth();
-      const d = parsed.getDate();
-      // Store as noon UTC on that calendar date — mstDateParts subtracts 7h → 5am MST, same day
-      claSheetDates[label] = new Date(Date.UTC(y, m, d, 12, 0, 0));
+      // Store as noon UTC so mstDateParts (UTC-7) → 5am same day, always correct
+      claSheetDates[label] = new Date(parsed.getTime() + 12 * 60 * 60 * 1000);
     }
   }
   // Header row is row index 4 (0-based), data starts at row 5
