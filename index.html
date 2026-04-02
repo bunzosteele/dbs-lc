@@ -4670,23 +4670,22 @@ function parseGearIssues(text, label) {
 function parseBuffConsumables(text, label) {
   const rows = parseCsvRows(text);
   // C3 (row index 2, col index 2) contains the raid date for this CLA
+  // Use the CLA label (e.g. "2/25", "3/4") as the raid date — it's set manually
+  // and is the actual raid date, unlike the CLA export date in the sheet which
+  // reflects when the export was generated (often the next day).
+  // Also try to get the year from the CLA date cell since labels don't include it.
   const dateStr = rows[2]?.[2]?.trim();
+  let raidYear = new Date().getUTCFullYear(); // default to current year
   if (dateStr) {
-    // CLA date format: "February 25, 2026 02:18:57"
-    // Manually parse to avoid ALL browser timezone interpretation.
-    // Extract month name, day, year directly via regex — ignore time entirely.
-    const MONTH_NAMES = ['january','february','march','april','may','june',
-                         'july','august','september','october','november','december'];
-    const m = dateStr.match(/([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})/);
-    if (m) {
-      const monthIdx = MONTH_NAMES.indexOf(m[1].toLowerCase());
-      const day = parseInt(m[2], 10);
-      const year = parseInt(m[3], 10);
-      if (monthIdx !== -1 && day && year) {
-        // Store as noon UTC on the exact calendar date — no TZ math involved at all
-        claSheetDates[label] = new Date(Date.UTC(year, monthIdx, day, 12, 0, 0));
-      }
-    }
+    const yearMatch = dateStr.match(/(20\d{2})/);
+    if (yearMatch) raidYear = parseInt(yearMatch[1], 10);
+  }
+  // Parse label as M/D
+  const labelMatch = label.match(/^(\d{1,2})\/(\d{1,2})$/);
+  if (labelMatch) {
+    const month = parseInt(labelMatch[1], 10) - 1; // 0-indexed
+    const day   = parseInt(labelMatch[2], 10);
+    claSheetDates[label] = new Date(Date.UTC(raidYear, month, day, 12, 0, 0));
   }
   // Header row is row index 4 (0-based), data starts at row 5
   const headers = rows[4]?.slice(2) || []; // col C onwards
