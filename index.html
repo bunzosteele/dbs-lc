@@ -5465,8 +5465,15 @@ function lootLogAddRaid() {
   const dateStr = input.value;
   if (lootDistribution.raids.find(r => r.date === dateStr)) return;
   const date = new Date(dateStr + 'T12:00:00');
-  lootDistribution.raids.push({ date: dateStr, label: formatRaidLabel(date), items: [] });
+  const label = formatRaidLabel(date);
+  lootDistribution.raids.push({ date: dateStr, label, items: [] });
   lootDistribution.raids.sort((a, b) => a.date.localeCompare(b.date));
+  // Also add to attendance so the raid appears on the roster tab
+  if (!attendanceData.raids.find(r => r.date === dateStr)) {
+    attendanceData.raids.push({ date: dateStr, label });
+    attendanceData.raids.sort((a, b) => a.date.localeCompare(b.date));
+    saveAttendanceToGitHub();
+  }
   input.value = '';
   document.getElementById('lootlogAddBtn')?.classList.remove('gloss-btn-ready');
   saveLootDistributionToGitHub();
@@ -5776,8 +5783,15 @@ function attendanceAddRaid() {
   const dateStr = input.value; // YYYY-MM-DD
   if (attendanceData.raids.find(r => r.date === dateStr)) return; // already exists
   const date = new Date(dateStr + 'T12:00:00'); // noon to avoid TZ issues
-  attendanceData.raids.push({ date: dateStr, label: formatRaidLabel(date) });
+  const label = formatRaidLabel(date);
+  attendanceData.raids.push({ date: dateStr, label });
   attendanceData.raids.sort((a, b) => a.date.localeCompare(b.date));
+  // Also add to loot distribution so loot assigned during the raid goes to the right date
+  if (!lootDistribution.raids.find(r => r.date === dateStr)) {
+    lootDistribution.raids.push({ date: dateStr, label, items: [] });
+    lootDistribution.raids.sort((a, b) => a.date.localeCompare(b.date));
+    saveLootDistributionToGitHub();
+  }
   input.value = '';
   saveAttendanceToGitHub();
   renderAttendancePanel();
