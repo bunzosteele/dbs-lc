@@ -3247,19 +3247,44 @@ function getRaidWepOilFrequency(dateLabel) {
   return freq;
 }
 
+// Determine if a player is exempt from weapon oil scoring.
+// Exempt: Hunters, Warriors, Rogues, Physical DPS Shamans,
+// Physical DPS Paladins, and Tank Paladins — these classes/specs
+// don't use weapon oils (they use ammo, sharpening stones, etc.)
+function isWepOilExempt(playerName) {
+  const cls = classMap[normalizeName(playerName)];
+  if (!cls) return false;
+  // Always exempt regardless of role
+  if (cls === 'Hunter' || cls === 'Warrior' || cls === 'Rogue') return true;
+  // Shaman / Paladin only exempt in physical roles (Physical DPS or Tanks)
+  if (cls === 'Shaman' || cls === 'Paladin') return isPhysicalRole(playerName);
+  return false;
+}
+
 // Compute adjusted per-raid consume score for a player, accounting for:
-// 1. Weapon oil forgiveness for Physical DPS / Tanks when it's a shared issue
-// 2. Per-raid outlier forgiveness based on player's track record
+// 1. Weapon oil exemption for classes that don't use them
+// 2. Weapon oil forgiveness for remaining Physical DPS / Tanks when it's a shared issue
+// 3. Per-raid outlier forgiveness based on player's track record
 function getAdjustedConsumeScores(playerName) {
   const key = normalizeName(playerName);
   const raidScores = buffScoreByPlayerDate[key] || {};
   const physical = isPhysicalRole(playerName);
+  const wepOilExempt = isWepOilExempt(playerName);
   const attended = Object.keys(raidScores).length;
 
-  // Step 1: compute adjusted score per raid (weapon oil forgiveness)
+  // Step 1: compute adjusted score per raid (weapon oil forgiveness / exemption)
   const adjusted = {};
   for (const [dateLabel, score] of Object.entries(raidScores)) {
     if (score.total === null || score.total === undefined) continue;
+
+    const elixir = score.elixir ?? 100;
+    const food = score.food ?? 100;
+
+    // If player is exempt from weapon oil, score only on elixir + food
+    if (wepOilExempt) {
+      adjusted[dateLabel] = (elixir + food) / 2;
+      continue;
+    }
 
     let wepOilScore = score.wepOil ?? 100;
 
@@ -3273,8 +3298,6 @@ function getAdjustedConsumeScores(playerName) {
     }
 
     // Recompute total from components: elixir + food + wepOil, equal weight
-    const elixir = score.elixir ?? 100;
-    const food = score.food ?? 100;
     const adjTotal = (elixir + food + wepOilScore) / 3;
     adjusted[dateLabel] = adjTotal;
   }
@@ -5633,7 +5656,7 @@ function renderAttendancePanel() {
       </div>
 
       <!-- Table -->
-      <div style="overflow-x:auto;">
+      <div id="attendanceScrollContainer" style="overflow-x:auto;">
         <table style="border-collapse:collapse;min-width:100%;">
           <thead>
             <tr style="border-bottom:2px solid var(--border);">
@@ -5797,6 +5820,9 @@ function renderAttendancePanel() {
   if (_attendanceDirty) {
     document.getElementById('attendanceSaveBtn')?.classList.add('gloss-btn-ready');
   }
+  // Scroll the attendance table to the right so the latest raids are visible
+  const _scrollEl = document.getElementById('attendanceScrollContainer');
+  if (_scrollEl) requestAnimationFrame(() => { _scrollEl.scrollLeft = _scrollEl.scrollWidth; });
 }
 
 
@@ -6400,174 +6426,7 @@ function getRosterClaRecommendations() {
   return [...candidates];
 }
 
-function renderRosterPanel() {
-  const panel = document.getElementById('rosterPanel');
-  if (!panel) return;
 
-  const filterRole = panel._filterRole || '';
-  const filterClass = panel._filterClass || '';
-
-  const roleOrder = ['Tanks', 'Physical DPS', 'Ranged DPS', 'Healers'];
-  const allRoles = roleOrder;
-  const allClasses = ['Druid','Hunter','Mage','Paladin','Priest','Rogue','Shaman','Warlock','Warrior'];
-
-  const filtered = rosterData.players.filter(p =>
-    (!filterRole  || p.role  === filterRole) &&
-    (!filterClass || p.class === filterClass)
-  );
-
-  const recommendations = getRosterClaRecommendations();
-
-  const CLASS_COLORS = {
-    'Druid':'#ff7c0a','Hunter':'#aad372','Mage':'#3fc7eb','Paladin':'#f48cba',
-    'Priest':'#ffffff','Rogue':'#fff468','Shaman':'#0070dd','Warlock':'#8788ee','Warrior':'#c69b3a',
-  };
-
-  function classStyle(cls) {
-    const c = CLASS_COLORS[cls] || 'var(--text)';
-    return `color:${c};font-weight:600;`;
-  }
-
-  panel.innerHTML = `
-    <div style="max-width:900px;margin:0 auto;padding:0 16px;">
-
-      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px;">
-        <div style="font-family:'Cinzel',serif;font-size:16px;letter-spacing:0.15em;color:var(--gold);">ROSTER</div>
-        <select id="rosterFilterRole" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px;" onchange="rosterApplyFilter()">
-          <option value="">All Roles</option>
-          ${allRoles.map(r => `<option value="${r}" ${filterRole===r?'selected':''}>${r}</option>`).join('')}
-        </select>
-        <select id="rosterFilterClass" style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:13px;" onchange="rosterApplyFilter()">
-          <option value="">All Classes</option>
-          ${(filterRole ? (ROLE_CLASSES[filterRole] || allClasses) : allClasses).map(c => `<option value="${c}" ${filterClass===c?'selected':''}>${c}</option>`).join('')}
-        </select>
-        <span style="color:var(--text-dim);font-size:13px;margin-left:auto;">${filtered.length} of ${rosterData.players.length} raiders</span>
-      </div>
-
-      <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
-        <thead>
-          <tr style="border-bottom:1px solid var(--border);">
-            <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">PLAYER</th>
-            <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">ROLE</th>
-            <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">CLASS</th>
-            <th style="text-align:center;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);" title="Loot Score — total loot value / raids attended">LS</th>
-            <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">TYPE</th>
-            <th style="text-align:center;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);" class="write-gated">ADD VALUE</th>
-            <th style="padding:6px 12px;"></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${filtered.map((p, i) => {
-            const _pKey = normalizeName(p.name);
-            const _pts = pointsByPlayer[_pKey] ?? 0;
-            return `
-            <tr style="border-bottom:1px solid var(--border)20;">
-              <td style="padding:7px 12px;color:${CLASS_COLORS[p.class]||'var(--text)'};font-weight:600;">${p.name}</td>
-              <td style="padding:7px 12px;color:var(--text-dim);font-size:13px;">${ROLE_ICONS[p.role]||''} ${p.role}</td>
-              <td style="padding:7px 12px;font-size:13px;${classStyle(p.class)}">${p.class}</td>
-              <td style="padding:7px 12px;text-align:center;font-family:'Cinzel',serif;font-size:13px;color:var(--text-dim);">${_pts}</td><td style="padding:7px 12px;font-size:11px;color:var(--text-dim);letter-spacing:0.05em;">
-                <div style="display:flex; align-items:center; gap:8px;">
-                  <input type="checkbox" ${p.isAlt ? 'checked' : ''} 
-                         onchange="rosterToggleAlt('${p.name}', this.checked)" 
-                         class="write-gated" 
-                         style="cursor:pointer; width:14px; height:14px; accent-color:var(--gold-dim);">
-                  <span style="${p.isAlt ? 'color:var(--gold-dim)' : ''}">${p.isAlt ? 'ALT' : 'MAIN'}</span>
-                </div>
-              </td>
-              <td style="padding:7px 12px;text-align:center;" class="write-gated">
-                <div style="display:flex;align-items:center;gap:4px;justify-content:center;">
-                  <input type="number" id="rosterAddValue_${_pKey}" placeholder="0" min="0" step="1"
-                    style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:3px;font-size:12px;width:60px;text-align:center;-moz-appearance:textfield;"
-                    onkeydown="if(event.key==='Enter')rosterAddLootValue('${p.name.replace(/'/g,"\\\\'")}')">
-                  <button onclick="rosterAddLootValue('${p.name.replace(/'/g,"\\\\'")}')"
-                    style="background:none;border:1px solid var(--gold-dim);color:var(--gold-dim);padding:3px 8px;border-radius:3px;cursor:pointer;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.05em;transition:all 0.15s;"
-                    onmouseover="this.style.background='var(--gold)';this.style.color='var(--bg)';this.style.borderColor='var(--gold)'"
-                    onmouseout="this.style.background='none';this.style.color='var(--gold-dim)';this.style.borderColor='var(--gold-dim)'"
-                    title="Add manual loot value to this player">+</button>
-                </div>
-              </td>
-              <td style="padding:7px 12px;text-align:right;">
-                <button class="write-gated" onclick="rosterRemovePlayer('${p.name}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;padding:2px 6px;" title="Remove from roster">✕</button>
-              </td>
-            </tr>`;}).join('')}
-        </tbody>
-      </table>
-
-      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;margin-bottom:24px;">
-        <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:12px;">ADD RAIDER</div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
-          <div style="display:flex;flex-direction:column;gap:4px;">
-            <label style="font-size:11px;color:var(--text-dim);">Name</label>
-            <input id="rosterAddName" class="write-gated" placeholder="Player name" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;width:160px;" oninput="rosterCheckAddReady()">
-          </div>
-          <div style="display:flex;flex-direction:column;gap:4px;">
-            <label style="font-size:11px;color:var(--text-dim);">Role</label>
-            <select id="rosterAddRole" class="write-gated" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;" onchange="rosterUpdateClassOptions();rosterCheckAddReady()">
-              <option value="">— Role —</option>
-              ${allRoles.map(r => `<option value="${r}">${r}</option>`).join('')}
-            </select>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:4px;">
-            <label style="font-size:11px;color:var(--text-dim);">Class</label>
-            <select id="rosterAddClass" class="write-gated" style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px;" onchange="rosterCheckAddReady()" disabled>
-              <option value="">— Select role first —</option>
-            </select>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:4px;align-items:center;padding:0 8px;">
-            <label style="font-size:11px;color:var(--text-dim);">Alt?</label>
-            <input type="checkbox" id="rosterAddIsAlt" class="write-gated" style="width:16px;height:16px;cursor:pointer;accent-color:var(--gold-dim);">
-          </div>
-          <button id="rosterAddBtn" class="gloss-btn-saveable write-gated" onclick="rosterAddPlayer()" style="background:var(--gold-dim);border:none;color:var(--bg);padding:7px 16px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.1em;transition:background 0.15s,box-shadow 0.15s;">ADD</button>
-        </div>
-      </div>
-
-      ${recommendations.length ? `
-      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:16px;">
-        <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:4px;">SEEN IN CLA — NOT ON ROSTER</div>
-        <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px;">These players appear in CLA exports but are not on the roster. Click ✕ to permanently exclude them.</div>
-        <div style="display:flex;flex-wrap:wrap;gap:8px;">
-          ${recommendations.map(key => `
-            <div style="display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:4px 10px;">
-              <span style="font-size:13px;color:var(--text);">${key}</span>
-              <button class="write-gated" onclick="rosterExcludePlayer('${key}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:12px;padding:0 2px;" title="Exclude permanently">✕</button>
-            </div>`).join('')}
-        </div>
-      </div>` : ''}
-
-    </div>
-  `;
-}
-
-  async function rosterToggleAlt(playerName, isChecked) {
-  // 1. Find the player in your rosterData object
-  const player = rosterData.players.find(p => normalizeName(p.name) === normalizeName(playerName));
-  
-  if (player) {
-    // 2. Update the value
-    player.isAlt = isChecked;
-    
-    // 3. Save the updated roster back to GitHub/Worker
-    await saveRosterToGitHub();
-    
-    // 4. Re-run the dashboard math so priority updates immediately
-    rebuildClassMap();
-    renderRosterPanel();
-    
-    // Optional: show a small toast or hint that it saved
-    if (window.setHint) setHint(`Updated ${playerName} to ${isChecked ? 'Alt' : 'Main'}`, 'success');
-  }
-}
-
-function rosterApplyFilter() {
-  const panel = document.getElementById('rosterPanel');
-  const newRole  = document.getElementById('rosterFilterRole')?.value  || '';
-  const newClass = document.getElementById('rosterFilterClass')?.value || '';
-  // Clear class filter if it's not valid for the newly selected role
-  const validClasses = newRole ? (ROLE_CLASSES[newRole] || []) : null;
-  panel._filterRole  = newRole;
-  panel._filterClass = (validClasses && newClass && !validClasses.includes(newClass)) ? '' : newClass;
-  renderRosterPanel();
-}
 
 function rosterUpdateClassOptions() {
   const role = document.getElementById('rosterAddRole')?.value;
@@ -6625,7 +6484,6 @@ function rosterAddPlayer() {
 
   rebuildClassMap();
   saveRosterToGitHub();
-  renderRosterPanel();
 }
 
 function rosterRemovePlayer(name) {
@@ -6633,7 +6491,6 @@ function rosterRemovePlayer(name) {
   rosterData.players = rosterData.players.filter(p => p.name !== name);
   rebuildClassMap();
   saveRosterToGitHub();
-  renderRosterPanel();
 }
 
 function rosterAddLootValue(playerName, keyOverride) {
@@ -6698,7 +6555,6 @@ function rosterExcludePlayer(key) {
   if (!rosterData.excluded) rosterData.excluded = [];
   if (!rosterData.excluded.includes(key)) rosterData.excluded.push(key);
   saveRosterToGitHub();
-  renderRosterPanel();
 }
 
 // ── BiS Browser ─────────────────────────────────────────────────
