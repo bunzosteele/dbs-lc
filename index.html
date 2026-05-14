@@ -2011,9 +2011,16 @@ function getPlayerAttendance(playerName, dateStr) {
 function setPlayerAttendanceOverride(playerName, dateStr, value) {
   const key = normalizeName(playerName);
   if (!attendanceData.overrides[key]) attendanceData.overrides[key] = {};
-  const claValue = window._claPresence?.[key]?.has(dateStr) ?? false;
-  if (value === claValue) {
-    // Removing override — matches CLA data
+  // Compute the effective baseline (what getPlayerAttendance would return without an override)
+  let baselineValue = false;
+  if (window._claPresence?.[key]?.has(dateStr)) {
+    baselineValue = true;
+  } else {
+    const raid = attendanceData.raids.find(r => r.date === dateStr);
+    if (raid?.players?.[key] !== undefined) baselineValue = raid.players[key];
+  }
+  if (value === baselineValue) {
+    // Removing override — matches baseline data
     delete attendanceData.overrides[key][dateStr];
     if (!Object.keys(attendanceData.overrides[key]).length) {
       delete attendanceData.overrides[key];
