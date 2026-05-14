@@ -2476,6 +2476,11 @@ function computePointsByPlayer(roles) {
       const items = lootByPlayer[key] || [];
       let totalEpv = 0;
       for (const entry of items) {
+        // Manual loot value adjustments carry their own value directly
+        if (entry.isManual && entry.manualValue !== undefined) {
+          totalEpv += entry.manualValue;
+          continue;
+        }
         const itemName = typeof entry === 'object' ? entry.name : entry;
         const itemId = getItemId(itemName, p.name);
         if (!itemId) continue;
@@ -2496,6 +2501,11 @@ function buildLootByPlayerFromDistribution() {
       if (!entry.item || !entry.recipient) continue;
       const key = normalizeName(entry.recipient);
       if (!result[key]) result[key] = [];
+      // Manual loot value adjustments carry their own value
+      if (entry.manualValue !== undefined) {
+        result[key].push({ name: entry.item, value: entry.manualValue, date: raid.date, label: raid.label, isManual: true, manualValue: entry.manualValue });
+        continue;
+      }
       const itemId = getItemId(entry.item);
       const value = itemId ? getItemLootValue(entry.recipient, itemId) : 0;
       result[key].push({ name: entry.item, value, date: raid.date, label: raid.label });
@@ -3893,7 +3903,13 @@ function toggleLoot(td, playerName) {
     html += `<em class="no-loot">No loot recorded</em>`;
   } else {
     const playerObj = lastRenderData.roles.flatMap(r => r.players).find(p => normalizeName(p.name) === key);
-    html += `<div class="loot-list">${items.map(({name, value, date, label}) => {
+    html += `<div class="loot-list">${items.map(({name, value, date, label, isManual, manualValue}) => {
+      // Manual loot value entries render differently
+      if (isManual) {
+        const col = lootValueColor(manualValue);
+        const tipText = `${label ? label + ' — ' : ''}Manual Loot Value: ${manualValue.toFixed(1)}`;
+        return `<span class="loot-item" style="border-color:${col};background:${col}18;" title="${tipText}"><span style="font-size:13px;">⚡</span> ${name} <span style="font-size:11px;opacity:0.7;">(${manualValue.toFixed(0)})</span></span>`;
+      }
       const itemId = getItemId(name, playerName);
       const epv = itemId ? getAvgRewardEpv(itemId) : null;
       const formulaEpv = itemId ? getWeightedItemEpv(playerName, itemId) : 0;
@@ -5422,6 +5438,22 @@ function lootLogRenderItems(dateStr) {
     <tbody>`;
 
   items.forEach((entry, idx) => {
+    // Manual loot value entries
+    if (entry.manualValue !== undefined) {
+      const mCol = lootValueColor(entry.manualValue);
+      const recipientColor = classColor(entry.recipient) || 'var(--text)';
+      html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
+        <td style="padding:5px 8px;font-size:13px;color:var(--gold-dim);"><span style="font-size:12px;">⚡</span> ${entry.item}</td>
+        <td style="padding:5px 8px;font-size:13px;color:${recipientColor};">${entry.recipient}</td>
+        <td style="padding:5px 8px;font-size:13px;color:${mCol};text-align:right;">${entry.manualValue.toFixed(1)}</td>
+        <td style="padding:5px 8px;text-align:center;">
+          <button class="write-gated" onclick="lootLogRemoveItem('${dateStr}', ${idx})"
+            style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;padding:0 4px;"
+            title="Remove item">✕</button>
+        </td>
+      </tr>`;
+      return;
+    }
     const itemId = getItemId(entry.item);
     const epv = itemId ? getWeightedItemEpv(entry.recipient, itemId) : 0;
     const epvColor = lootValueColor(epv);
@@ -6399,16 +6431,22 @@ function renderRosterPanel() {
             <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">PLAYER</th>
             <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">ROLE</th>
             <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">CLASS</th>
+            <th style="text-align:center;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);" title="Loot Score — total loot value / raids attended">LS</th>
             <th style="text-align:left;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);">TYPE</th>
+            <th style="text-align:center;padding:6px 12px;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.15em;color:var(--gold-dim);" class="write-gated">ADD VALUE</th>
             <th style="padding:6px 12px;"></th>
           </tr>
         </thead>
         <tbody>
-          ${filtered.map((p, i) => `
+          ${filtered.map((p, i) => {
+            const _pKey = normalizeName(p.name);
+            const _pts = pointsByPlayer[_pKey] ?? 0;
+            return `
             <tr style="border-bottom:1px solid var(--border)20;">
               <td style="padding:7px 12px;color:${CLASS_COLORS[p.class]||'var(--text)'};font-weight:600;">${p.name}</td>
               <td style="padding:7px 12px;color:var(--text-dim);font-size:13px;">${ROLE_ICONS[p.role]||''} ${p.role}</td>
-              <td style="padding:7px 12px;font-size:13px;${classStyle(p.class)}">${p.class}</td><td style="padding:7px 12px;font-size:11px;color:var(--text-dim);letter-spacing:0.05em;">
+              <td style="padding:7px 12px;font-size:13px;${classStyle(p.class)}">${p.class}</td>
+              <td style="padding:7px 12px;text-align:center;font-family:'Cinzel',serif;font-size:13px;color:var(--text-dim);">${_pts}</td><td style="padding:7px 12px;font-size:11px;color:var(--text-dim);letter-spacing:0.05em;">
                 <div style="display:flex; align-items:center; gap:8px;">
                   <input type="checkbox" ${p.isAlt ? 'checked' : ''} 
                          onchange="rosterToggleAlt('${p.name}', this.checked)" 
@@ -6417,10 +6455,22 @@ function renderRosterPanel() {
                   <span style="${p.isAlt ? 'color:var(--gold-dim)' : ''}">${p.isAlt ? 'ALT' : 'MAIN'}</span>
                 </div>
               </td>
+              <td style="padding:7px 12px;text-align:center;" class="write-gated">
+                <div style="display:flex;align-items:center;gap:4px;justify-content:center;">
+                  <input type="number" id="rosterAddValue_${_pKey}" placeholder="0" min="0" step="1"
+                    style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:3px 6px;border-radius:3px;font-size:12px;width:60px;text-align:center;-moz-appearance:textfield;"
+                    onkeydown="if(event.key==='Enter')rosterAddLootValue('${p.name.replace(/'/g,"\\\\'")}')">
+                  <button onclick="rosterAddLootValue('${p.name.replace(/'/g,"\\\\'")}')"
+                    style="background:none;border:1px solid var(--gold-dim);color:var(--gold-dim);padding:3px 8px;border-radius:3px;cursor:pointer;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.05em;transition:all 0.15s;"
+                    onmouseover="this.style.background='var(--gold)';this.style.color='var(--bg)';this.style.borderColor='var(--gold)'"
+                    onmouseout="this.style.background='none';this.style.color='var(--gold-dim)';this.style.borderColor='var(--gold-dim)'"
+                    title="Add manual loot value to this player">+</button>
+                </div>
+              </td>
               <td style="padding:7px 12px;text-align:right;">
                 <button class="write-gated" onclick="rosterRemovePlayer('${p.name}')" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;padding:2px 6px;" title="Remove from roster">✕</button>
               </td>
-            </tr>`).join('')}
+            </tr>`;}).join('')}
         </tbody>
       </table>
 
@@ -6565,6 +6615,46 @@ function rosterRemovePlayer(name) {
   rebuildClassMap();
   saveRosterToGitHub();
   renderRosterPanel();
+}
+
+function rosterAddLootValue(playerName) {
+  const key = normalizeName(playerName);
+  const input = document.getElementById(`rosterAddValue_${key}`);
+  const val = parseFloat(input?.value);
+  if (!val || val <= 0) {
+    if (window.setHint) setHint('Enter a positive loot value.', 'error');
+    return;
+  }
+
+  // Prompt for a note/reason
+  const note = prompt(`Adding ${val} loot value to ${playerName}.\n\nOptional note (e.g. "Transferred from OldChar"):`, 'Character transfer') || 'Manual adjustment';
+
+  // Add as a special entry to loot-distribution on today's date
+  const dateStr = todayMST();
+  let raid = lootDistribution.raids.find(r => r.date === dateStr);
+  if (!raid) {
+    const date = new Date(dateStr + 'T12:00:00');
+    const label = formatRaidLabel(date);
+    raid = { date: dateStr, label, items: [] };
+    lootDistribution.raids.push(raid);
+    lootDistribution.raids.sort((a, b) => a.date.localeCompare(b.date));
+  }
+  if (!raid.items) raid.items = [];
+  raid.items.push({
+    item: `Manual: ${note}`,
+    recipient: playerName,
+    manualValue: val
+  });
+
+  // Rebuild loot data and save
+  lootByPlayer = buildLootByPlayerFromDistribution();
+  if (lastRenderData?.roles) pointsByPlayer = computePointsByPlayer(lastRenderData.roles);
+  saveLootDistributionToGitHub();
+
+  // Clear input and re-render
+  if (input) input.value = '';
+  renderRosterPanel();
+  if (window.setHint) setHint(`Added ${val} loot value to ${playerName}`, 'success');
 }
 
 function rosterExcludePlayer(key) {
