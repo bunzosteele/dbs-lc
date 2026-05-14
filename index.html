@@ -3972,6 +3972,25 @@ function toggleLoot(td, playerName) {
     }
   }
 
+  // Manual loot value section (write-gated, available from any tab)
+  if (writeToken) {
+    const _mvKey = normalizeName(playerName);
+    const _existingManual = (lootByPlayer[_mvKey] || []).filter(e => e.isManual);
+    const _manualTotal = _existingManual.reduce((sum, e) => sum + (e.manualValue || 0), 0);
+    html += `<div class="expand-section-title" style="margin-top:12px;">Add Loot Value</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;">
+        <input type="number" id="manualLootVal_${_mvKey}" placeholder="Value" min="0" step="1"
+          style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:13px;width:80px;-moz-appearance:textfield;"
+          onkeydown="if(event.key==='Enter')rosterAddLootValue('${playerName.replace(/'/g,"\\\\'")}','${_mvKey}')">
+        <input type="text" id="manualLootNote_${_mvKey}" placeholder="Note (e.g. transferred from OldChar)" 
+          style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:13px;flex:1;min-width:180px;"
+          onkeydown="if(event.key==='Enter')rosterAddLootValue('${playerName.replace(/'/g,"\\\\'")}','${_mvKey}')">
+        <button onclick="rosterAddLootValue('${playerName.replace(/'/g,"\\\\'")}','${_mvKey}')"
+          style="background:var(--gold-dim);border:none;color:var(--bg);padding:5px 12px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;">ADD VALUE</button>
+      </div>
+      ${_manualTotal > 0 ? `<div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Manual value total: <span style="color:var(--gold);">${_manualTotal.toFixed(0)}</span></div>` : ''}`;
+  }
+
   html += `</td>`;
   lootTr.innerHTML = html;
   setTimeout(() => { if (typeof $WowheadPower !== 'undefined' && $WowheadPower.refreshLinks) $WowheadPower.refreshLinks(); }, 200);
@@ -6617,17 +6636,17 @@ function rosterRemovePlayer(name) {
   renderRosterPanel();
 }
 
-function rosterAddLootValue(playerName) {
-  const key = normalizeName(playerName);
-  const input = document.getElementById(`rosterAddValue_${key}`);
-  const val = parseFloat(input?.value);
+function rosterAddLootValue(playerName, keyOverride) {
+  const key = keyOverride || normalizeName(playerName);
+  const valInput = document.getElementById(`manualLootVal_${key}`) || document.getElementById(`rosterAddValue_${key}`);
+  const noteInput = document.getElementById(`manualLootNote_${key}`);
+  const val = parseFloat(valInput?.value);
   if (!val || val <= 0) {
     if (window.setHint) setHint('Enter a positive loot value.', 'error');
     return;
   }
 
-  // Prompt for a note/reason
-  const note = prompt(`Adding ${val} loot value to ${playerName}.\n\nOptional note (e.g. "Transferred from OldChar"):`, 'Character transfer') || 'Manual adjustment';
+  const note = noteInput?.value?.trim() || 'Manual adjustment';
 
   // Add as a special entry to loot-distribution on today's date
   const dateStr = todayMST();
@@ -6651,9 +6670,27 @@ function rosterAddLootValue(playerName) {
   if (lastRenderData?.roles) pointsByPlayer = computePointsByPlayer(lastRenderData.roles);
   saveLootDistributionToGitHub();
 
-  // Clear input and re-render
-  if (input) input.value = '';
-  renderRosterPanel();
+  // Clear inputs
+  if (valInput) valInput.value = '';
+  if (noteInput) noteInput.value = '';
+
+  // Re-open the loot row to show updated data
+  const allLootRows = document.querySelectorAll('.loot-row');
+  allLootRows.forEach(row => {
+    const prevTr = row.previousElementSibling;
+    if (prevTr) {
+      const nameTd = prevTr.querySelector('.player-name');
+      if (nameTd && normalizeName(nameTd.textContent.trim()) === normalizeName(playerName)) {
+        const arrow = nameTd.querySelector('.loot-arrow');
+        row.remove();
+        if (arrow) {
+          arrow.textContent = '▸';
+          setTimeout(() => nameTd.click(), 50);
+        }
+      }
+    }
+  });
+
   if (window.setHint) setHint(`Added ${val} loot value to ${playerName}`, 'success');
 }
 
