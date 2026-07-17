@@ -1298,7 +1298,7 @@
             LootMod = 1.0 − percentile × 0.667
           </div>
           <div style="margin-top:8px;color:var(--text-dim);">
-            Each player's loot score reflects the weighted value of items they've received relative to their raids attended. Players are ranked within their role group — the highest scorer receives ×0.33, the lowest receives ×1.0. Hover any item in the loot received dropdown for a full breakdown of how it was weighted.
+            Each player's loot score reflects the weighted value of items they've received relative to their raids attended. Item value diminishes with each time it's handed out: the first raid night an item is awarded, every recipient that night counts as the 1st receipt and gets 100% of its value; the next raid night it's handed out, recipients count from where the last batch left off — e.g. if 2 people split an item on night one, the next person to get it (even weeks later) is the 3rd recipient and counts at 80%. Value drops 10 percentage points per recipient this way, floored at 50% from the 6th recipient on. Players are ranked within their role group — the highest scorer receives ×0.33, the lowest receives ×1.0. Hover any item in the loot received dropdown for a full breakdown of how it was weighted, including its receipt order.
           </div>
         </div>
 
@@ -2465,6 +2465,14 @@ function getItemLootValue(playerName, itemId) {
   return getWeightedItemEpv(playerName, itemId);
 }
 
+// Diminishing-returns multiplier applied by receipt order: the first player to receive a
+// given item gets 100% of its loot value credited, each subsequent recipient of that same
+// item gets 10 percentage points less, floored at 50%.
+// occurrence is 1-indexed (1 = first person ever to receive this item).
+function getLootOccurrenceMultiplier(occurrence) {
+  return Math.max(0.5, 1 - (occurrence - 1) * 0.1);
+}
+
 function getItemNameById(itemId) {
   if (!itemId) return null;
   for (const v of Object.values(gearItemIds)) {
@@ -2488,10 +2496,9 @@ function computePointsByPlayer(roles) {
           totalEpv += entry.manualValue;
           continue;
         }
-        const itemName = typeof entry === 'object' ? entry.name : entry;
-        const itemId = getItemId(itemName, p.name);
-        if (!itemId) continue;
-        totalEpv += getItemLootValue(p.name, itemId);
+        // Use the value already computed (base formula/override × receipt-order multiplier)
+        // in buildLootByPlayerFromDistribution, so points and loot log stay in sync.
+        totalEpv += (typeof entry === 'object' ? entry.value : 0) || 0;
       }
       const attended = p.attended || 1;
       computed[key] = Math.round(totalEpv / attended);
@@ -2502,20 +2509,48 @@ function computePointsByPlayer(roles) {
 
 function buildLootByPlayerFromDistribution() {
   const result = {};
+  // Tracks total recipients of each item (by normalized name) so far, walked in chronological
+  // order. All recipients within the same raid night share one occurrence/multiplier (based on
+  // how many people already had the item before that night), and that batch then counts as
+  // that many "slots" toward the multiplier for any later date.
+  const itemCumulativeCount = {};
   // Process raids in chronological order, then reverse per player for recency
   for (const raid of [...lootDistribution.raids].sort((a,b) => a.date.localeCompare(b.date))) {
-    for (const entry of (raid.items || [])) {
+    const items = raid.items || [];
+    // First pass: count real (non-manual) drops of each item in this raid, and lock in the
+    // occurrence/multiplier for the whole batch based on the count going into this raid.
+    const raidItemCounts = {};
+    for (const entry of items) {
+      if (!entry.item || !entry.recipient || entry.manualValue !== undefined) continue;
+      const itemKey = normalizeName(entry.item);
+      raidItemCounts[itemKey] = (raidItemCounts[itemKey] || 0) + 1;
+    }
+    const raidItemOccurrence = {};
+    for (const itemKey in raidItemCounts) {
+      raidItemOccurrence[itemKey] = (itemCumulativeCount[itemKey] || 0) + 1;
+    }
+    // Second pass: build result entries using the locked-in occurrence for this raid night.
+    for (const entry of items) {
       if (!entry.item || !entry.recipient) continue;
       const key = normalizeName(entry.recipient);
       if (!result[key]) result[key] = [];
-      // Manual loot value adjustments carry their own value
+      // Manual loot value adjustments carry their own value and aren't subject to the
+      // receipt-order multiplier (they're a direct, deliberate correction).
       if (entry.manualValue !== undefined) {
         result[key].push({ name: entry.item, value: entry.manualValue, date: raid.date, label: raid.label, isManual: true, manualValue: entry.manualValue });
         continue;
       }
       const itemId = getItemId(entry.item);
-      const value = itemId ? getItemLootValue(entry.recipient, itemId) : 0;
-      result[key].push({ name: entry.item, value, date: raid.date, label: raid.label });
+      const baseValue = itemId ? getItemLootValue(entry.recipient, itemId) : 0;
+      const itemKey = normalizeName(entry.item);
+      const occurrence = raidItemOccurrence[itemKey];
+      const occMult = getLootOccurrenceMultiplier(occurrence);
+      const value = baseValue * occMult;
+      result[key].push({ name: entry.item, value, baseValue, occurrence, occMult, date: raid.date, label: raid.label });
+    }
+    // After processing this raid night, advance the cumulative count for next time.
+    for (const itemKey in raidItemCounts) {
+      itemCumulativeCount[itemKey] = (itemCumulativeCount[itemKey] || 0) + raidItemCounts[itemKey];
     }
   }
   // Reverse so most recent appears first
@@ -3474,8 +3509,16 @@ function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, point
         const dateLabel = attendanceData.raids[i]?.date || normalizeDate(dates[i]);
         if (p.pct === null) {
           dotsHtml += `<div class="raid-dot absent" title="${dates[i]}"></div>`;
-        } else if (i < p.first || i > p.last) {
+        } else if (i < p.first) {
           dotsHtml += `<div class="raid-dot inactive"></div>`;
+        } else if (i > p.last) {
+          // Raids after this player's last attendance: for a still-active player (within the
+          // grace window) these are counted misses, same as the pct calculation — show as
+          // absent, not blank, so a skipped most-recent raid is visible here too.
+          // Only a truly inactive/departed player (grace period exceeded) gets a blank dot.
+          dotsHtml += p.inactive
+            ? `<div class="raid-dot inactive"></div>`
+            : `<div class="raid-dot absent" title="${dates[i]}: Absent"></div>`;
         } else if (!p.flags[i]) {
           dotsHtml += `<div class="raid-dot absent" title="${dates[i]}: Absent"></div>`;
         } else {
@@ -3933,7 +3976,7 @@ function toggleLoot(td, playerName) {
     html += `<em class="no-loot">No loot recorded</em>`;
   } else {
     const playerObj = lastRenderData.roles.flatMap(r => r.players).find(p => normalizeName(p.name) === key);
-    html += `<div class="loot-list">${items.map(({name, value, date, label, isManual, manualValue}) => {
+    html += `<div class="loot-list">${items.map(({name, value, baseValue, occurrence, occMult, date, label, isManual, manualValue}) => {
       // Manual loot value entries render differently
       if (isManual) {
         const col = lootValueColor(manualValue);
@@ -3943,8 +3986,8 @@ function toggleLoot(td, playerName) {
       const itemId = getItemId(name, playerName);
       const epv = itemId ? getAvgRewardEpv(itemId) : null;
       const formulaEpv = itemId ? getWeightedItemEpv(playerName, itemId) : 0;
-      const lootValue  = itemId ? getItemLootValue(playerName, itemId) : 0;
-      const isOverridden = lootValue !== formulaEpv;
+      const isOverridden = baseValue !== formulaEpv;
+      const lootValue = value; // base formula/override value × receipt-order multiplier
       const col = lootValueColor(lootValue);
       const effListCount = itemId ? getEffectiveListCount(itemId) : 0;
       const logMult = effListCount ? (Math.log(effListCount + 1) / Math.log(BIS_LOG_BASE)) : 0;
@@ -3953,9 +3996,14 @@ function toggleLoot(td, playerName) {
       const _isToken = itemId ? !!TOKEN_REWARDS[itemId] : false;
       const _nLabel = _isToken ? `${effListCount} rewards (capped)` : `${effListCount} players`;
       const _epvLabel = _isToken ? 'avgEPV' : 'maxEPV';
-      const epvTip = isOverridden
-        ? ` title="${label ? label + ' — ' : ''}Loot Value: ${lootValue.toFixed(1)} (overridden)"`
-        : ` title="${label ? label + ' — ' : ''} ${_epvLabel}: ${epv ? epv.toFixed(1) : '0'} × ${logMult.toFixed(2)} (log ${_nLabel}) × avg^1.5(${rankAvg.toFixed(3)}) × best(${rankBest.toFixed(2)})^0.5${_is2h ? ' × 0.5 (2H)' : ''} = ${formulaEpv.toFixed(1)}"`;
+      const _occN = occurrence || 1;
+      const _occSuffix = _occN === 1 ? 'st' : _occN === 2 ? 'nd' : _occN === 3 ? 'rd' : 'th';
+      const _occLabel = `${_occN}${_occSuffix} recipient of this item`;
+      const _occPct = `${Math.round((occMult ?? 1) * 100)}%`;
+      const baseTip = isOverridden
+        ? `Loot Value: ${baseValue.toFixed(1)} (overridden)`
+        : `${_epvLabel}: ${epv ? epv.toFixed(1) : '0'} × ${logMult.toFixed(2)} (log ${_nLabel}) × avg^1.5(${rankAvg.toFixed(3)}) × best(${rankBest.toFixed(2)})^0.5${_is2h ? ' × 0.5 (2H)' : ''} = ${formulaEpv.toFixed(1)}`;
+      const epvTip = ` title="${label ? label + ' — ' : ''}${baseTip} × ${_occPct} (${_occLabel}) = ${lootValue.toFixed(1)}"`;
       return `<span class="loot-item" style="border-color:${col};background:${col}18;"${epvTip}>${itemLink(name, name)}</span>`;
     }).join('')}</div>`;
   }
