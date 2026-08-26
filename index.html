@@ -2927,7 +2927,7 @@ function wclColor(pct) {
 
 let _githubSaveTimer = null;
 async function saveClaSheetsToGitHub() {
-  if (!writeToken) return;
+  if (!writeToken) return false;
   // Debounce: cancel pending save and wait 600ms to batch rapid calls
   if (_githubSaveTimer) clearTimeout(_githubSaveTimer);
   await new Promise(resolve => { _githubSaveTimer = setTimeout(resolve, 600); });
@@ -2942,12 +2942,18 @@ async function saveClaSheetsToGitHub() {
     });
     if (res.ok) {
       setHint('✓ Saved!', 'success');
+      return true;
     } else {
-      const err = await putRes.json();
-      setHint(`GitHub save failed: ${err.message}`, 'error');
+      // NOTE: this referenced an undefined `putRes`, so every failed save threw a
+      // ReferenceError here and reported that instead of the actual HTTP failure.
+      let detail = res.status + '';
+      try { detail = (await res.json()).message || detail; } catch(_) {}
+      setHint(`GitHub save failed: ${detail}`, 'error');
+      return false;
     }
   } catch(e) {
     setHint(`GitHub save error: ${e.message}`, 'error');
+    return false;
   }
 }
 
@@ -4674,6 +4680,130 @@ function _isUsableClaCacheEntry(e) {
       || (e.buffScores && Object.keys(e.buffScores).length > 0);
 }
 
+// ── KV cache warmer ─────────────────────────────────────────────
+// Fills the KV cache one sheet at a time, slowly enough to stay well under corsproxy.io's
+// free-tier rate limit, saving progress as it goes. Run this ONCE from the console; after
+// it finishes, normal page loads serve every warmed sheet from KV and make zero proxy
+// requests. Paced deliberately — the whole point is to not trip the limiter again.
+//
+//   warmClaCache()                       // fill in whatever isn't cached yet
+//   warmClaCache({ force: true })        // re-fetch every sheet from scratch
+//   warmClaCache({ reqPerMin: 15 })      // go slower still
+async function warmClaCache(opts = {}) {
+  const { force = false, reqPerMin = 24, saveEvery = 3 } = opts;
+
+  if (!writeToken) { console.error('warmClaCache: no write token saved — enter it in the dashboard first.'); return; }
+  if (!APPS_SCRIPT) { console.error('warmClaCache: apps_script is not configured in config.json.'); return; }
+  if (!CORS_API_KEY) console.warn('warmClaCache: no cors_api_key set — requests will likely 401.');
+
+  const gap = Math.ceil(60000 / Math.max(1, reqPerMin));
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // Start from a clean breaker; this is an explicit, deliberate attempt.
+  _corsProxyTripped = null;
+  _corsProxy429s = 0;
+  _claFailedLabels = new Set();
+
+  if (force) _claStoredParsed = {};
+  else for (const [label, e] of Object.entries(_claStoredParsed)) {
+    if (!_isUsableClaCacheEntry(e)) delete _claStoredParsed[label];
+  }
+
+  // Rebuild in-memory state from whatever is already cached, so recency comparisons
+  // against already-warmed sheets are correct as we add new ones.
+  claDataByPlayer = {}; claPlayersByLabel = {}; buffScoreByPlayerDate = {};
+  latestGearIssuesByPlayer = {}; gearListingByPlayer = {}; claSheetDates = {}; canonicalNames = {};
+  _applyClaStoredParsed();
+
+  // Oldest first, so each sheet we parse is newer than everything already in memory and
+  // the gear-listing recency rules resolve the same way a full load would.
+  const todo = claSheets
+    .map((s, i) => ({ s, i }))
+    .filter(({ s }) => s.sheetId && !_claStoredParsed[s.label])
+    .sort((a, b) => a.i - b.i);
+
+  if (!todo.length) { console.log('warmClaCache: nothing to do — every sheet with a URL is already cached.'); return; }
+
+  const totalReqs = todo.reduce((n, { s }) => n + 2 + (s.gearListingGid ? 1 : 0), 0);
+  const etaMin = ((totalReqs * gap) / 60000).toFixed(1);
+  console.log(`warmClaCache: ${todo.length} sheet(s), ~${totalReqs} requests at ${reqPerMin}/min — about ${etaMin} min. Leave this tab open.`);
+
+  let done = 0, failed = 0, sinceSave = 0;
+
+  for (const { s: sheet, i: sheetIdx } of todo) {
+    if (_corsProxyTripped) {
+      console.error(`warmClaCache: halted — corsproxy.io returned ${_corsProxyTripped}. ` +
+        `${done} sheet(s) warmed and saved before stopping. Fix the proxy, then run warmClaCache() again to resume.`);
+      break;
+    }
+
+    const label = sheet.label;
+    let ok = true;
+    // One request at a time, spaced by `gap`. Sequential on purpose.
+    const pull = async (gid, what) => {
+      await sleep(gap);
+      try { return await fetchSheet(sheet.sheetId, gid); }
+      catch (e) { ok = false; console.warn(`  ✗ "${label}" ${what}: ${e.message}`); return null; }
+    };
+
+    const gearText = await pull(sheet.gearGid, 'gear issues');
+    if (gearText) {
+      try { parseGearIssues(gearText, label); }
+      catch (e) { ok = false; console.warn(`  ✗ "${label}" gear issues parse: ${e.message}`); }
+    }
+
+    const buffText = _corsProxyTripped ? null : await pull(sheet.buffGid, 'buff consumables');
+    if (buffText) {
+      try { parseBuffConsumables(buffText, label); }
+      catch (e) { ok = false; console.warn(`  ✗ "${label}" buff parse: ${e.message}`); }
+    }
+
+    if (sheet.gearListingGid && !_corsProxyTripped) {
+      const listText = await pull(sheet.gearListingGid, 'gear listing');
+      if (listText) {
+        // claSheetDates[label] is populated by parseGearIssues above, so recency is correct.
+        try {
+          const data = parseGearListing(listText);
+          const thisDate = claSheetDates[label] || null;
+          Object.entries(data).forEach(([playerName, slots]) => {
+            const key = normalizeName(playerName);
+            const existingLabel = gearListingByPlayer[key]?.label;
+            const existingDate = existingLabel ? (claSheetDates[existingLabel] || null) : null;
+            let isNewer;
+            if (thisDate && existingDate) isNewer = thisDate >= existingDate;
+            else {
+              const ei = existingLabel ? claSheets.findIndex(x => x.label === existingLabel) : -1;
+              isNewer = sheetIdx >= ei;
+            }
+            if (isNewer) gearListingByPlayer[key] = { label, slots };
+          });
+        } catch (e) { ok = false; console.warn(`  ✗ "${label}" gear listing parse: ${e.message}`); }
+      }
+    }
+
+    if (ok) { done++; sinceSave++; console.log(`  ✓ ${label}  (${done}/${todo.length})`); }
+    else { failed++; _claFailedLabels.add(label); console.warn(`  ⚠ ${label} incomplete — not cached, will retry on a later run.`); }
+
+    // Checkpoint. _storeParsedClaData skips failed labels, so a partial run still banks
+    // every sheet that fully succeeded rather than losing the work.
+    if (sinceSave >= saveEvery || _corsProxyTripped) {
+      _storeParsedClaData();
+      const saved = await saveClaSheetsToGitHub();
+      console.log(saved ? `  … checkpoint saved (${Object.keys(_claStoredParsed).length} sheets in cache)`
+                        : '  … checkpoint SAVE FAILED — see the error above');
+      sinceSave = 0;
+    }
+  }
+
+  _storeParsedClaData();
+  const saved = await saveClaSheetsToGitHub();
+  console.log(`warmClaCache: finished — ${done} warmed, ${failed} failed, ` +
+    `${Object.keys(_claStoredParsed).length} sheet(s) now cached in KV. Final save: ${saved ? 'ok' : 'FAILED'}.`);
+  if (failed || _corsProxyTripped) console.log('Run warmClaCache() again to retry the sheets that failed — cached ones are skipped.');
+  else console.log('Reload the page — it should now load without any corsproxy.io requests for CLA data.');
+}
+window.warmClaCache = warmClaCache;
+
 // Escape hatch: wipe the KV-persisted CLA cache and force a full re-fetch on next load.
 async function clearClaCache() {
   _claStoredParsed = {};
@@ -4734,7 +4864,7 @@ function _storeParsedClaData() {
     // Canonical names
     const canonical = { ...canonicalNames };
 
-    _claStoredParsed[label] = {
+    const entry = {
       sheetDate,
       claPresence,
       canonicalNames: canonical,
@@ -4743,6 +4873,14 @@ function _storeParsedClaData() {
       buffScores,
       gearListing,
     };
+    // Invariant: never store an entry with no players in it. A sheet that was never
+    // attempted this run (the warmer halted before reaching it, say) produces exactly
+    // that, and storing it would mark the sheet "cached" so nothing ever re-fetches it.
+    if (!_isUsableClaCacheEntry(entry)) {
+      if (prev[label]) _claStoredParsed[label] = prev[label];
+      continue;
+    }
+    _claStoredParsed[label] = entry;
   }
   console.log('Stored parsed CLA data for', Object.keys(_claStoredParsed).length, 'of',
     claSheets.length, 'sheets' + (_claFailedLabels.size ? ` (${_claFailedLabels.size} skipped — failed this load)` : ''));
