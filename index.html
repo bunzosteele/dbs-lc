@@ -2959,12 +2959,22 @@ async function saveClaSheetsToGitHub() {
 
 let APPS_SCRIPT = '';
 let ICON_SCRIPT = '';
-let CORS_API_KEY = ''; // corsproxy.io API key — set via cors_api_key in config.json
+let CORS_API_KEY = ''; // legacy corsproxy.io key — only used if cf_worker_url is unset
 
-// Build a corsproxy.io URL using the current API key (corsproxy.io now requires
-// both the ?url= param format and a &key= for anything beyond a trivial free quota —
-// see https://corsproxy.io/pricing/)
+// Route CORS-blocked fetches through our own Cloudflare Worker's /proxy endpoint.
+//
+// This used to point at corsproxy.io. Their free tier is scoped to localhost and dev
+// tunnels only, so a free key can never authenticate from a GitHub Pages origin — it
+// returns {"error":"Invalid or inactive API key"} on every request regardless of the
+// Allowed Domains list. The Worker has no rate limit, no monthly quota, no key, and
+// no third party. corsproxy is kept only as a fallback for installs that haven't set
+// cf_worker_url yet.
 function corsProxyUrl(targetUrl) {
+  const base = (CF_WORKER_URL || '').trim().replace(/\/+$/, '');
+  if (base) {
+    const b = base.startsWith('http') ? base : 'https://' + base;
+    return b + '/proxy?url=' + encodeURIComponent(targetUrl);
+  }
   let u = 'https://corsproxy.io/?url=' + encodeURIComponent(targetUrl);
   if (CORS_API_KEY) u += '&key=' + encodeURIComponent(CORS_API_KEY);
   return u;
@@ -2999,7 +3009,7 @@ const CORS_429_LIMIT = 3;
 
 async function appsScriptFetch(url, _retry = 0) {
   if (_corsProxyTripped) {
-    throw new Error('Apps Script fetch skipped — corsproxy.io returned ' + _corsProxyTripped +
+    throw new Error('Apps Script fetch skipped — the CORS proxy returned ' + _corsProxyTripped +
       ' and further requests were halted for this load');
   }
   // Apps Script redirects through script.googleusercontent.com
@@ -3155,7 +3165,7 @@ async function fetchData() {
       _claNewlyParsed = 0;
     } else if (_claNewlyParsed > 0 && claFetchFailed) {
       console.warn(`NOT persisting CLA cache — ${_claFailedLabels.size} sheet(s) failed this load` +
-        (_corsProxyTripped ? ` and corsproxy.io returned ${_corsProxyTripped}` : '') +
+        (_corsProxyTripped ? ` and the CORS proxy returned ${_corsProxyTripped}` : '') +
         '. Fix the fetch errors and reload; the cache will be written on a clean load.');
     }
     // Build attendance from CLA data
@@ -4654,7 +4664,7 @@ async function reparseAllClaData() {
       _claStoredParsed = backup;
       if (btn) { btn.textContent = 'Re-parse CLAs'; btn.disabled = false; }
       setHint(`Re-parse aborted — ${failed} sheet(s) failed to fetch` +
-        (_corsProxyTripped ? ` (corsproxy.io returned ${_corsProxyTripped})` : '') +
+        (_corsProxyTripped ? ` (the CORS proxy returned ${_corsProxyTripped})` : '') +
         '. The existing cache was left untouched.', 'error');
       return;
     }
@@ -4681,20 +4691,20 @@ function _isUsableClaCacheEntry(e) {
 }
 
 // ── KV cache warmer ─────────────────────────────────────────────
-// Fills the KV cache one sheet at a time, slowly enough to stay well under corsproxy.io's
-// free-tier rate limit, saving progress as it goes. Run this ONCE from the console; after
-// it finishes, normal page loads serve every warmed sheet from KV and make zero proxy
-// requests. Paced deliberately — the whole point is to not trip the limiter again.
+// Fills the KV cache one sheet at a time, checkpointing progress as it goes, so a run
+// that dies partway can be resumed instead of restarted. With the Worker proxy there is
+// no rate limit to respect, so this is now a convenience (bank 29 sheets once, resumably)
+// rather than a necessity — a normal page load will warm the cache on its own.
 //
 //   warmClaCache()                       // fill in whatever isn't cached yet
 //   warmClaCache({ force: true })        // re-fetch every sheet from scratch
-//   warmClaCache({ reqPerMin: 15 })      // go slower still
+//   warmClaCache({ reqPerMin: 15 })      // go slower (gentler on Apps Script)
 async function warmClaCache(opts = {}) {
-  const { force = false, reqPerMin = 24, saveEvery = 3 } = opts;
+  const { force = false, reqPerMin = 60, saveEvery = 3 } = opts;
 
   if (!writeToken) { console.error('warmClaCache: no write token saved — enter it in the dashboard first.'); return; }
   if (!APPS_SCRIPT) { console.error('warmClaCache: apps_script is not configured in config.json.'); return; }
-  if (!CORS_API_KEY) console.warn('warmClaCache: no cors_api_key set — requests will likely 401.');
+  if (!CF_WORKER_URL && !CORS_API_KEY) console.warn('warmClaCache: no cf_worker_url set — requests have no proxy and will fail.');
 
   const gap = Math.ceil(60000 / Math.max(1, reqPerMin));
   const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -4732,7 +4742,7 @@ async function warmClaCache(opts = {}) {
 
   for (const { s: sheet, i: sheetIdx } of todo) {
     if (_corsProxyTripped) {
-      console.error(`warmClaCache: halted — corsproxy.io returned ${_corsProxyTripped}. ` +
+      console.error(`warmClaCache: halted — the CORS proxy returned ${_corsProxyTripped}. ` +
         `${done} sheet(s) warmed and saved before stopping. Fix the proxy, then run warmClaCache() again to resume.`);
       break;
     }
@@ -4940,11 +4950,12 @@ async function fetchAllClaData() {
     }
   });
 
-  // Fetch ONLY sheets we have no cached parse for, at most 2 sheets' worth of requests
-  // (up to 6 concurrent HTTP calls) at a time — firing every sheet's requests at once
-  // easily blows past corsproxy.io's free-tier rate limit (60 req/min) and returns 429s.
+  // Fetch ONLY sheets we have no cached parse for, 4 sheets' worth of requests (up to 12
+  // concurrent HTTP calls) at a time. The Worker proxy has no rate limit, so this cap now
+  // exists to stay clear of Apps Script's own simultaneous-execution quota rather than a
+  // third party's — which is why it's 4 and not unbounded.
   if (uncachedFetch.length) {
-    await runWithConcurrency(uncachedFetch, 2, async (sheet) => {
+    await runWithConcurrency(uncachedFetch, 4, async (sheet) => {
       const sheetIdx = claSheets.indexOf(sheet);
       await Promise.all([
         fetchSheet(sheet.sheetId, sheet.gearGid)
@@ -5254,12 +5265,14 @@ async function loadGearItemIdsFromRepo() {
     const _hl = document.getElementById('formulaHalflifeDisplay');
     if (_hl) _hl.textContent = FORMULA_TENURE_FORGIVENESS_HALFLIFE;
     console.log('config.json loaded — worker:', CF_WORKER_URL, '| WCL:', ENABLE_WCL,
-      '| Apps Script:', ENABLE_APPS_SCRIPT, '| CORS key:', CORS_API_KEY ? 'set' : 'MISSING');
-    // Apps Script calls are proxied through corsproxy.io, which rejects unauthenticated
-    // requests with a 401. Surface a missing key up front rather than as a wall of 401s.
-    if (ENABLE_APPS_SCRIPT && APPS_SCRIPT && !CORS_API_KEY) {
-      console.warn('No cors_api_key in config.json — Apps Script fetches will be sent unauthenticated and corsproxy.io will reject them with 401. See README section 2.');
-      addError('config.json', 'Missing "cors_api_key" — Apps Script/CLA fetches will fail with 401. See README section 2.');
+      '| Apps Script:', ENABLE_APPS_SCRIPT,
+      '| CORS proxy:', CF_WORKER_URL ? 'Cloudflare Worker /proxy' : (CORS_API_KEY ? 'corsproxy.io (legacy)' : 'NONE'));
+    // Apps Script fetches are CORS-blocked at the browser and must go through a proxy.
+    // The Worker is that proxy; without cf_worker_url there is nothing to fall back to
+    // except corsproxy.io, whose free tier cannot serve a production origin at all.
+    if (ENABLE_APPS_SCRIPT && APPS_SCRIPT && !CF_WORKER_URL) {
+      console.warn('No cf_worker_url in config.json — Apps Script fetches have no working proxy. See README section 3.');
+      addError('config.json', 'Missing "cf_worker_url" — Apps Script/CLA fetches have no proxy and will fail. See README section 3.');
     }
   } catch(e) {
     console.warn('config.json not found or invalid — using defaults:', e.message);
