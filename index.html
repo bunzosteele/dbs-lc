@@ -2981,13 +2981,35 @@ async function proxyFetch(targetUrl) {
   throw new Error('All proxies failed for: ' + targetUrl);
 }
 
-async function appsScriptFetch(url) {
+async function appsScriptFetch(url, _retry = 0) {
   // Apps Script redirects through script.googleusercontent.com
   // corsproxy.io handles the redirect chain and returns CORS headers
   const proxy = corsProxyUrl(url);
   const res = await fetch(proxy);
+  if (res.status === 429 && _retry < 4) {
+    // Rate-limited by corsproxy.io (free tier: 60 req/min, very low concurrency) —
+    // back off and retry, honoring Retry-After if corsproxy sends one.
+    const retryAfterSec = parseFloat(res.headers.get('Retry-After'));
+    const delayMs = !isNaN(retryAfterSec) ? retryAfterSec * 1000 : (600 * Math.pow(2, _retry) + Math.random() * 300);
+    await new Promise(r => setTimeout(r, delayMs));
+    return appsScriptFetch(url, _retry + 1);
+  }
   if (!res.ok) throw new Error('Apps Script fetch failed: ' + res.status);
   return res.text();
+}
+
+// Run `items` through `worker` with at most `limit` in flight at once.
+// Used to keep corsproxy.io request bursts under its (low) free-tier rate limit
+// instead of firing every CLA sheet's requests simultaneously.
+async function runWithConcurrency(items, limit, worker) {
+  let idx = 0;
+  async function next() {
+    while (idx < items.length) {
+      const i = idx++;
+      await worker(items[i], i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, next));
 }
 
 async function fetchSheet(sheetId, gid) {
@@ -4701,22 +4723,27 @@ async function fetchAllClaData() {
     }
   });
 
-  await Promise.all(fetchSheets.flatMap((sheet, sheetIdx) => [
-    fetchSheet(sheet.sheetId, sheet.gearGid)
-      .then(text => gearResults.push({ label: sheet.label, text }))
-      .catch(e => addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, e.message)),
-    sheet.gearListingGid
-      ? fetchSheet(sheet.sheetId, sheet.gearListingGid)
-          .then(text => gearListingResults.push({ label: sheet.label, text, sheetIdx }))
-          .catch(e => addError(`CLA "${sheet.label}" — Gear Listing (gid: ${sheet.gearListingGid})`, e.message))
-      : Promise.resolve(),
-    fetchSheet(sheet.sheetId, sheet.buffGid)
-      .then(text => {
-        try { parseBuffConsumables(text, sheet.label); }
-        catch(e) { addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, `Parse error: ${e.message}`); }
-      })
-      .catch(e => addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, e.message)),
-  ]));
+  // Fetch at most 2 CLA sheets' worth of requests (up to 6 concurrent HTTP calls) at a time —
+  // firing every sheet's requests at once easily blows past corsproxy.io's free-tier rate limit
+  // (60 req/min, very low concurrency) and returns 429s.
+  await runWithConcurrency(fetchSheets, 2, async (sheet, sheetIdx) => {
+    await Promise.all([
+      fetchSheet(sheet.sheetId, sheet.gearGid)
+        .then(text => gearResults.push({ label: sheet.label, text }))
+        .catch(e => addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, e.message)),
+      sheet.gearListingGid
+        ? fetchSheet(sheet.sheetId, sheet.gearListingGid)
+            .then(text => gearListingResults.push({ label: sheet.label, text, sheetIdx }))
+            .catch(e => addError(`CLA "${sheet.label}" — Gear Listing (gid: ${sheet.gearListingGid})`, e.message))
+        : Promise.resolve(),
+      fetchSheet(sheet.sheetId, sheet.buffGid)
+        .then(text => {
+          try { parseBuffConsumables(text, sheet.label); }
+          catch(e) { addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, `Parse error: ${e.message}`); }
+        })
+        .catch(e => addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, e.message)),
+    ]);
+  });
 
   // Now that claSheetDates is fully populated, parse gear issues and gear listings with correct recency
   for (const { label, text } of gearResults) {
