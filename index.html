@@ -1496,6 +1496,7 @@ let itemValueMap = {}; // normalized item name -> loot value (number)
 let itemIcons = {}; // item id -> icon name
 let claSheets = [];
 let _claStoredParsed = {}; // parsed CLA data loaded from KV, keyed by label
+let _claNewlyParsed = 0;   // # sheets parsed fresh this load (not served from KV cache)
 let claDataByPlayer = {};
 let claPlayersByLabel = {}; // label -> Set of normalised player keys
 let canonicalNames = {}; // normalized key -> exact name with special chars from CLA
@@ -3102,6 +3103,14 @@ async function fetchData() {
 
     // Store parsed CLA data for future cached loads
     _storeParsedClaData();
+    // Persist the cache if we parsed anything new this load, so the next visitor (and the
+    // next reload) serves those sheets from KV instead of re-fetching them. Requires a
+    // write token — read-only users still benefit from whatever an officer has cached.
+    if (_claNewlyParsed > 0 && writeToken) {
+      console.log(`Persisting CLA cache — ${_claNewlyParsed} newly parsed sheet(s)`);
+      saveClaSheetsToGitHub().catch(e => console.warn('CLA cache persist failed:', e.message));
+      _claNewlyParsed = 0;
+    }
     // Build attendance from CLA data
     rebuildAttendanceFromCla();
     if (groupingMode === 'attendance') renderAttendancePanel();
@@ -4663,55 +4672,21 @@ async function fetchAllClaData() {
   claSheetDates = {};
   canonicalNames = {};
 
-  // Paste-mode entries already have parsed data stored — only fetch-mode entries need HTTP
-  const fetchSheets = claSheets.filter(s => s.sheetId); // always fetch URL/GID sheets regardless of ENABLE_APPS_SCRIPT
-  const pasteSheets = claSheets.filter(s => s.csvGear || s.csvBuff);
+  // Partition by what work each sheet actually needs. Anything already parsed into
+  // _claStoredParsed (loaded from KV) needs no HTTP at all, so adding one new raid
+  // costs 3 requests instead of re-pulling every historical CLA from scratch.
+  const cachedSheets  = claSheets.filter(s => _claStoredParsed[s.label]);
+  const uncachedFetch = claSheets.filter(s => !_claStoredParsed[s.label] && s.sheetId);
+  const uncachedPaste = claSheets.filter(s => !_claStoredParsed[s.label] && (s.csvGear || s.csvBuff));
+  console.log('[fetchAllClaData] total:', claSheets.length, '| cached:', cachedSheets.length,
+    '| to fetch:', uncachedFetch.length, '| paste:', uncachedPaste.length);
+  _claNewlyParsed = uncachedFetch.length + uncachedPaste.length;
 
-  // If all sheets are either cached or paste-mode, skip fetching entirely
-  const allHandled = claSheets.length > 0 && claSheets.every(s =>
-    _claStoredParsed[s.label] || s.csvGear
-  );
-  console.log('[fetchAllClaData] allHandled:', allHandled, '| fetchSheets:', fetchSheets.length, '| pasteSheets:', pasteSheets.length, '| cached:', claSheets.filter(s => _claStoredParsed[s.label]).length);
-  if (allHandled) {
-    console.log('Loading CLA data from cache/paste (' + claSheets.length + ' sheets)');
-    // Apply paste-mode entries directly
-    // Collect paste gear listings and run through recency-ordered processing alongside cached data
-    const _pasteGearListingResults = [];
-    pasteSheets.forEach(s => {
-      if (!_claStoredParsed[s.label]) {
-        try { parseGearIssues(normalizeClaPaste(s.csvGear||''), s.label); } catch(e) {}
-        try { parseBuffConsumables(normalizeClaPaste(s.csvBuff||''), s.label); } catch(e) {}
-        if (s.csvGearListing) {
-          _pasteGearListingResults.push({ label: s.label, text: normalizeClaPaste(s.csvGearListing), sheetIdx: claSheets.indexOf(s) });
-        }
-      }
-    });
-    _applyClaStoredParsed();
-    // Apply paste gear listings after cache restore, with recency checks
-    _pasteGearListingResults.sort((a, b) => a.sheetIdx - b.sheetIdx);
-    for (const { label, text, sheetIdx } of _pasteGearListingResults) {
-      try {
-        const data = parseGearListing(text);
-        const thisDate = claSheetDates[label] || null;
-        Object.entries(data).forEach(([playerName, slots]) => {
-          const key = normalizeName(playerName);
-          const existingLabel = gearListingByPlayer[key]?.label;
-          const existingDate = existingLabel ? (claSheetDates[existingLabel] || null) : null;
-          const existingIdx = existingLabel ? claSheets.findIndex(s => s.label === existingLabel) : -1;
-          const isNewer = (thisDate && existingDate) ? thisDate >= existingDate : sheetIdx >= existingIdx;
-          if (isNewer) gearListingByPlayer[key] = { label, slots };
-        });
-      } catch(e) {}
-    }
-    return;
-  }
-
-  // Fetch all CLA sheets in parallel, collecting raw results first
+  // Collect raw results first, then parse in recency order once all dates are known
   const gearResults = [];        // { label, text }
   const gearListingResults = []; // { label, text, sheetIdx }
-
-  // Parse paste-mode entries immediately (no fetch needed)
-  pasteSheets.forEach((sheet, idx) => {
+  // Parse uncached paste-mode entries immediately (no fetch needed)
+  uncachedPaste.forEach(sheet => {
     const csvGear = normalizeClaPaste(sheet.csvGear || '');
     const csvBuff = normalizeClaPaste(sheet.csvBuff || '');
     const csvGearListing = sheet.csvGearListing ? normalizeClaPaste(sheet.csvGearListing) : '';
@@ -4723,27 +4698,35 @@ async function fetchAllClaData() {
     }
   });
 
-  // Fetch at most 2 CLA sheets' worth of requests (up to 6 concurrent HTTP calls) at a time —
-  // firing every sheet's requests at once easily blows past corsproxy.io's free-tier rate limit
-  // (60 req/min, very low concurrency) and returns 429s.
-  await runWithConcurrency(fetchSheets, 2, async (sheet, sheetIdx) => {
-    await Promise.all([
-      fetchSheet(sheet.sheetId, sheet.gearGid)
-        .then(text => gearResults.push({ label: sheet.label, text }))
-        .catch(e => addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, e.message)),
-      sheet.gearListingGid
-        ? fetchSheet(sheet.sheetId, sheet.gearListingGid)
-            .then(text => gearListingResults.push({ label: sheet.label, text, sheetIdx }))
-            .catch(e => addError(`CLA "${sheet.label}" — Gear Listing (gid: ${sheet.gearListingGid})`, e.message))
-        : Promise.resolve(),
-      fetchSheet(sheet.sheetId, sheet.buffGid)
-        .then(text => {
-          try { parseBuffConsumables(text, sheet.label); }
-          catch(e) { addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, `Parse error: ${e.message}`); }
-        })
-        .catch(e => addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, e.message)),
-    ]);
-  });
+  // Fetch ONLY sheets we have no cached parse for, at most 2 sheets' worth of requests
+  // (up to 6 concurrent HTTP calls) at a time — firing every sheet's requests at once
+  // easily blows past corsproxy.io's free-tier rate limit (60 req/min) and returns 429s.
+  if (uncachedFetch.length) {
+    await runWithConcurrency(uncachedFetch, 2, async (sheet) => {
+      const sheetIdx = claSheets.indexOf(sheet);
+      await Promise.all([
+        fetchSheet(sheet.sheetId, sheet.gearGid)
+          .then(text => gearResults.push({ label: sheet.label, text }))
+          .catch(e => addError(`CLA "${sheet.label}" — Gear Issues (gid: ${sheet.gearGid})`, e.message)),
+        sheet.gearListingGid
+          ? fetchSheet(sheet.sheetId, sheet.gearListingGid)
+              .then(text => gearListingResults.push({ label: sheet.label, text, sheetIdx }))
+              .catch(e => addError(`CLA "${sheet.label}" — Gear Listing (gid: ${sheet.gearListingGid})`, e.message))
+          : Promise.resolve(),
+        fetchSheet(sheet.sheetId, sheet.buffGid)
+          .then(text => {
+            try { parseBuffConsumables(text, sheet.label); }
+            catch(e) { addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, `Parse error: ${e.message}`); }
+          })
+          .catch(e => addError(`CLA "${sheet.label}" — Buff Consumables (gid: ${sheet.buffGid})`, e.message)),
+      ]);
+    });
+  }
+
+  // Restore everything we already had parsed in KV. This pre-populates claSheetDates for
+  // every cached label and applies gear listings / latest issues under the same recency
+  // rules, so cached and freshly-fetched sheets interleave correctly whichever is newer.
+  if (cachedSheets.length) _applyClaStoredParsed();
 
   // Now that claSheetDates is fully populated, parse gear issues and gear listings with correct recency
   for (const { label, text } of gearResults) {
