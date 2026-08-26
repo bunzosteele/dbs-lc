@@ -2951,12 +2951,22 @@ async function saveClaSheetsToGitHub() {
 
 let APPS_SCRIPT = '';
 let ICON_SCRIPT = '';
+let CORS_API_KEY = ''; // corsproxy.io API key — set via cors_api_key in config.json
+
+// Build a corsproxy.io URL using the current API key (corsproxy.io now requires
+// both the ?url= param format and a &key= for anything beyond a trivial free quota —
+// see https://corsproxy.io/pricing/)
+function corsProxyUrl(targetUrl) {
+  let u = 'https://corsproxy.io/?url=' + encodeURIComponent(targetUrl);
+  if (CORS_API_KEY) u += '&key=' + encodeURIComponent(CORS_API_KEY);
+  return u;
+}
 
 // Fetch a Google Sheet tab via Apps Script proxy
 async function proxyFetch(targetUrl) {
   const proxies = [
     u => 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(u),
-    u => 'https://corsproxy.io/?' + encodeURIComponent(u),
+    u => corsProxyUrl(u),
     u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u),
   ];
   for (const proxy of proxies) {
@@ -2974,7 +2984,7 @@ async function proxyFetch(targetUrl) {
 async function appsScriptFetch(url) {
   // Apps Script redirects through script.googleusercontent.com
   // corsproxy.io handles the redirect chain and returns CORS headers
-  const proxy = 'https://corsproxy.io/?' + encodeURIComponent(url);
+  const proxy = corsProxyUrl(url);
   const res = await fetch(proxy);
   if (!res.ok) throw new Error('Apps Script fetch failed: ' + res.status);
   return res.text();
@@ -2991,7 +3001,7 @@ async function fetchSheet(sheetId, gid) {
 // Legacy proxy list kept for CLA sheets from other spreadsheets
 const PROXIES = [
   url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
-  url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+  url => corsProxyUrl(url),
   url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
 ];
 
@@ -4934,6 +4944,7 @@ async function loadGearItemIdsFromRepo() {
     if (cfg.cf_worker_url)       CF_WORKER_URL        = cfg.cf_worker_url.trim().replace(/\/+$/, '');
     if (cfg.sheet_id)            SHEET_ID             = cfg.sheet_id;
     if (cfg.apps_script)         APPS_SCRIPT          = cfg.apps_script;
+    if (cfg.cors_api_key)        CORS_API_KEY         = cfg.cors_api_key.trim();
     if (cfg.guild_name)          GUILD_NAME           = cfg.guild_name;
     if (cfg.guild_subtitle)      GUILD_SUBTITLE       = cfg.guild_subtitle;
     if (cfg.page_title)          PAGE_TITLE           = cfg.page_title;
