@@ -726,6 +726,16 @@
     margin-bottom: 8px;
   }
 
+  /* Raw accumulated loot value beside the "Loot Received" heading — the Loot Score
+     numerator before the raids-attended divisor. Brighter than the heading so the
+     number reads as data rather than as part of the label. */
+  .raw-loot-total {
+    color: var(--text-dim);
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    cursor: help;
+  }
+
   .cla-entry-label {
     font-family: 'Cinzel', serif;
     font-size: 10px;
@@ -2502,25 +2512,32 @@ function getItemNameById(itemId) {
   return null;
 }
 
+// Total raw loot value for a player — the sum of every item's weighted value BEFORE the
+// raids-attended divisor. This is the numerator of the Loot Score, and it is also what the
+// "Loot Received (n)" header shows, so both read from here rather than each summing their
+// own way: two copies of this loop would eventually disagree.
+function getRawLootValue(playerKey) {
+  let totalEpv = 0;
+  for (const entry of (lootByPlayer[playerKey] || [])) {
+    // Manual loot value adjustments carry their own value directly
+    if (entry.isManual && entry.manualValue !== undefined) {
+      totalEpv += entry.manualValue;
+      continue;
+    }
+    // Use the value already computed (base formula/override × receipt-order multiplier)
+    // in buildLootByPlayerFromDistribution, so points and loot log stay in sync.
+    totalEpv += (typeof entry === 'object' ? entry.value : 0) || 0;
+  }
+  return totalEpv;
+}
+
 function computePointsByPlayer(roles) {
   const computed = {};
   for (const role of roles) {
     for (const p of role.players) {
       const key = normalizeName(p.name);
-      const items = lootByPlayer[key] || [];
-      let totalEpv = 0;
-      for (const entry of items) {
-        // Manual loot value adjustments carry their own value directly
-        if (entry.isManual && entry.manualValue !== undefined) {
-          totalEpv += entry.manualValue;
-          continue;
-        }
-        // Use the value already computed (base formula/override × receipt-order multiplier)
-        // in buildLootByPlayerFromDistribution, so points and loot log stay in sync.
-        totalEpv += (typeof entry === 'object' ? entry.value : 0) || 0;
-      }
       const attended = p.attended || 1;
-      computed[key] = Math.round(totalEpv / attended);
+      computed[key] = Math.round(getRawLootValue(key) / attended);
     }
   }
   return computed;
@@ -4114,7 +4131,11 @@ function toggleLoot(td, playerName) {
         <span>+ LOG ${_truncItem}</span><span style="font-size:9px;opacity:0.7;letter-spacing:0.05em;">${_logRaidLabel}</span>
       </button>`
     : '';
-  html += `<div style="display:flex;align-items:center;gap:0;margin-bottom:4px;"><div class="expand-section-title">Loot Received</div>${_assignBtn}</div>`;
+  // Raw accumulated loot value — the Loot Score numerator, before the raids-attended
+  // divisor is applied. Shown so the score can be read as "this total ÷ raids attended".
+  const _rawLoot = getRawLootValue(key);
+  const _rawLootHtml = `<span class="raw-loot-total" title="Total raw loot value accumulated, before the raids-attended modifier that produces the Loot Score">(${Math.round(_rawLoot)})</span>`;
+  html += `<div style="display:flex;align-items:center;gap:0;margin-bottom:4px;"><div class="expand-section-title">Loot Received ${_rawLootHtml}</div>${_assignBtn}</div>`;
   if (!items || items.length === 0) {
     html += `<em class="no-loot">No loot recorded</em>`;
   } else {
