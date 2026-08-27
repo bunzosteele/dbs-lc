@@ -19,6 +19,8 @@
     --text-dim: #a8a89a;
     --red: #c94c4c;
     --green: #4caa6e;
+    /* Width of the main content column. Was 960px; +10% for the wider tables. */
+    --content-width: 1056px;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -45,7 +47,10 @@
   }
 
   .container {
-    max-width: 960px;
+    /* Widened from 960px to 1056px (+10%) to give the wide tables more room —
+       the attendance cell in particular grew by ~24px when the perfect-attendance
+       star slot was added. Single knob: change --content-width to retune. */
+    max-width: var(--content-width, 1056px);
     margin: 0 auto;
     padding: 40px 24px 80px;
     position: relative;
@@ -494,6 +499,23 @@
     font-weight: 700;
     min-width: 52px;
     text-align: right;
+  }
+
+  /* Perfect-attendance flair: 20+ raids and never missed one. Display only —
+     nothing here feeds the priority formulas. */
+  .att-star {
+    font-size: 14px;
+    line-height: 1;
+    color: #f0c419;
+    filter: drop-shadow(0 0 4px rgba(240,196,25,0.55));
+    cursor: default;
+  }
+  /* Reserve the slot so percentages stay aligned whether or not a star is present. */
+  .att-star-slot {
+    display: inline-block;
+    width: 14px;
+    text-align: center;
+    flex: 0 0 14px;
   }
 
   .att-pct.high { color: #8abf50; }
@@ -2999,29 +3021,44 @@ async function proxyFetch(targetUrl) {
   throw new Error('All proxies failed for: ' + targetUrl);
 }
 
-// Circuit breaker: once corsproxy.io starts rejecting us (401, or repeated 429s),
-// every further request just burns quota and digs the hole deeper — sustained
-// rate-limit violations are what get a key flagged in the first place. Trip the
-// breaker and fail the rest of the load fast instead of hammering.
+// Circuit breaker: when the proxy rejects us for a reason that applies to EVERY request
+// (bad credentials, rate limit), failing the remaining ~130 requests one at a time is
+// just noise. Trip once and fail the rest fast.
 let _corsProxyTripped = null; // null = ok, otherwise the status that tripped it
 let _corsProxy429s = 0;
 const CORS_429_LIMIT = 3;
+
+// Clear the breaker before any user-initiated fetch. It is scoped to one load, but
+// adding a CLA sheet or looking up gear IDs happens long after a load that may have
+// tripped it — without this reset those actions fail with a stale "halted" error.
+function resetProxyBreaker() {
+  _corsProxyTripped = null;
+  _corsProxy429s = 0;
+}
 
 async function appsScriptFetch(url, _retry = 0) {
   if (_corsProxyTripped) {
     throw new Error('Apps Script fetch skipped — the CORS proxy returned ' + _corsProxyTripped +
       ' and further requests were halted for this load');
   }
-  // Apps Script redirects through script.googleusercontent.com
-  // corsproxy.io handles the redirect chain and returns CORS headers
+  // Apps Script redirects through script.googleusercontent.com, which sends no CORS
+  // headers; the proxy follows that redirect and adds them.
   const proxy = corsProxyUrl(url);
   const res = await fetch(proxy);
 
-  if (res.status === 401 || res.status === 403) {
-    // Auth/authorization rejection — retrying can never help, and volume is what
-    // gets keys suspended. Stop the whole load here.
-    _corsProxyTripped = res.status;
-    throw new Error('Apps Script fetch failed: ' + res.status);
+  if (res.status === 401) {
+    // Credentials rejected — applies to every request, so retrying can never help.
+    _corsProxyTripped = 401;
+    throw new Error('Apps Script fetch failed: 401');
+  }
+
+  if (res.status === 403) {
+    // With the Worker proxy, 403 means "this target host isn't on the allowlist" —
+    // that is specific to ONE url, not a global failure, so it must NOT trip the
+    // breaker or a single mistyped sheet URL would abort the entire load.
+    let detail = '';
+    try { detail = (await res.clone().json()).error || ''; } catch(_) {}
+    throw new Error('Apps Script fetch failed: 403' + (detail ? ' — ' + detail : ''));
   }
 
   if (res.status === 429) {
@@ -3591,6 +3628,17 @@ function groupPlayers(allPlayers) {
   });
 }
 
+// Gold-star flair: 20+ raids attended AND a perfect attendance percentage.
+// Purely cosmetic — deliberately not referenced by calculatePriority or any formula.
+const PERFECT_ATT_MIN_RAIDS = 20;
+function hasPerfectAttendance(p) {
+  return !!p
+    && p.pct !== null && p.pct !== undefined
+    && p.attended >= PERFECT_ATT_MIN_RAIDS
+    // pct is (attended / window) * 100; guard the float rather than testing === 100.
+    && p.pct >= 99.995;
+}
+
 function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, pointValues, priorityNorm = 1) {
   let html = '';
   for (const p of sorted) {
@@ -3711,6 +3759,9 @@ function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, point
           <td>
             <div class="att-cell">
               <div class="att-bar-bg"><div class="att-bar-fill ${cls}" style="width:${barWidth}%"></div></div>
+              <span class="att-star-slot">${hasPerfectAttendance(p)
+                ? `<span class="att-star" title="Perfect attendance — ${p.attended} raids, no misses">★</span>`
+                : ''}</span>
               <span class="att-pct ${cls}">${pctStr}</span>
             </div>
           </td>
@@ -4496,7 +4547,9 @@ function addCla() {
     if (!sheetId) { alert('Could not parse Sheet ID from URL.'); return; }
     entry = { label, url, sheetId, gearGid, buffGid };
     if (gearListingGid) entry.gearListingGid = gearListingGid;
-    // Gap-fill item IDs from gear listing if provided
+    // Gap-fill item IDs from gear listing if provided. Reset the breaker first: a page
+    // load that tripped it hours ago must not make adding a raid fail instantly.
+    resetProxyBreaker();
     if (gearListingGid && writeToken) processGearListingForItemIds(sheetId, gearListingGid);
     document.getElementById('claUrl').value = '';
     document.getElementById('claGearGid').value = '';
@@ -4542,6 +4595,9 @@ function addCla() {
 
   document.getElementById('claLabel').value = '';
   claSheets.push(entry);
+  // Re-store AFTER the push. _storeParsedClaData iterates claSheets, so the earlier
+  // paste-mode call above ran before this entry existed and could never cache it.
+  if (!ENABLE_APPS_SCRIPT) _storeParsedClaData();
   saveClaSheets();
   renderClaList();
   saveClaSheetsToGitHub();
@@ -4550,7 +4606,15 @@ function addCla() {
 }
 
 function removeCla(i) {
+  const removed = claSheets[i];
   claSheets.splice(i, 1);
+  // Drop its cache entry too. _applyClaStoredParsed walks every label in the cache,
+  // including ones no longer in claSheets, so an orphan entry would keep injecting a
+  // deleted raid's attendance, gear issues and buff scores into memory on every load.
+  if (removed && _claStoredParsed[removed.label]) {
+    delete _claStoredParsed[removed.label];
+    _claFailedLabels.delete(removed.label);
+  }
   saveClaSheets();
   renderClaList();
   saveClaSheetsToGitHub();
@@ -4599,7 +4663,12 @@ function _applyClaStoredParsed() {
         // Apply recency logic for latestGearIssuesByPlayer
         const existingLabel = latestGearIssuesByPlayer[key]?.label;
         const existingDate = existingLabel ? (claSheetDates[existingLabel] || null) : null;
-        const thisDate = pd.sheetDate || null;
+        // Use the NORMALISED date, not pd.sheetDate. After a JSON round-trip through KV
+        // pd.sheetDate is an ISO string while claSheetDates holds Date objects, and
+        // `string >= Date` compares "2026-03-13T12:.." against "Fri Mar 13 2026 .."
+        // lexicographically — always false. That made every recency check fail, so the
+        // FIRST label processed won and "latest" silently resolved to the OLDEST raid.
+        const thisDate = claSheetDates[label] || null;
         let isNewer;
         if (thisDate && existingDate) { isNewer = thisDate >= existingDate; }
         else {
@@ -4628,7 +4697,12 @@ function _applyClaStoredParsed() {
       for (const [key, slots] of Object.entries(pd.gearListing)) {
         const existingLabel = gearListingByPlayer[key]?.label;
         const existingDate = existingLabel ? (claSheetDates[existingLabel] || null) : null;
-        const thisDate = pd.sheetDate || null;
+        // Use the NORMALISED date, not pd.sheetDate. After a JSON round-trip through KV
+        // pd.sheetDate is an ISO string while claSheetDates holds Date objects, and
+        // `string >= Date` compares "2026-03-13T12:.." against "Fri Mar 13 2026 .."
+        // lexicographically — always false. That made every recency check fail, so the
+        // FIRST label processed won and "latest" silently resolved to the OLDEST raid.
+        const thisDate = claSheetDates[label] || null;
         let isNewer;
         if (thisDate && existingDate) { isNewer = thisDate >= existingDate; }
         else {
@@ -4850,13 +4924,24 @@ function _storeParsedClaData() {
       if (data.label === label) latestIssues[key] = data;
     }
 
-    // Buff scores per player for this label's date
+    // Buff scores per player for this label's date.
+    //
+    // buffScoreByPlayerDate is keyed by an ISO 'YYYY-MM-DD' STRING (parseBuffConsumables
+    // uses formatAttendanceDate), but claSheetDates[label] holds a Date OBJECT. Indexing
+    // the former with the latter coerces the Date via toString() —
+    // "Fri Feb 20 2026 12:00:00 GMT+0000" — which never matches, so this silently stored
+    // {} for every sheet. Harmless while the cache was broken; with the cache working, a
+    // fully-cached load would have had no consumable data and quietly wrong priority
+    // scores. Normalise to the same string key both sides use.
+    const sheetDateKey = sheetDate
+      ? (sheetDate instanceof Date ? formatAttendanceDate(sheetDate) : String(sheetDate))
+      : null;
     const buffScores = {};
-    if (sheetDate) {
+    if (sheetDateKey) {
       for (const [key, scores] of Object.entries(buffScoreByPlayerDate)) {
-        if (scores[sheetDate]) {
+        if (scores[sheetDateKey]) {
           if (!buffScores[key]) buffScores[key] = {};
-          buffScores[key][sheetDate] = scores[sheetDate];
+          buffScores[key][sheetDateKey] = scores[sheetDateKey];
         }
       }
     }
