@@ -5220,6 +5220,11 @@ function parseBuffConsumables(text, label) {
     });
     const key = normalizeName(player);
     if (!claDataByPlayer[key]) claDataByPlayer[key] = { gearIssues: [], buffConsumables: [] };
+    // NOTE: buffConsumables is populated here but is NOT written to the KV cache by
+    // _storeParsedClaData, so it is always [] on a cached load. That is currently
+    // harmless because nothing renders it — the consumes column and the raid dots both
+    // read buffScoreByPlayerDate, which IS cached. If you ever display this, cache it
+    // too or it will silently be empty for every visitor who loads from KV.
     claDataByPlayer[key].buffConsumables.push({ label, cols });
     // Store exact name with special chars for WCL lookups
     if (!canonicalNames[key]) canonicalNames[key] = player;
