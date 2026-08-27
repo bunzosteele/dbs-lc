@@ -1322,10 +1322,20 @@
         <div>
           <div style="font-family:'Cinzel',serif;font-size:12px;letter-spacing:0.15em;color:var(--gold-dim);margin-bottom:8px;">LOOT SCORE MODIFIER <span style="color:var(--text-dim);font-weight:400;">(×0.33 – ×1.0)</span></div>
           <div style="font-family:monospace;font-size:12px;background:var(--bg2);padding:8px 12px;border-left:2px solid var(--gold-dim);color:var(--text-dim);">
-            LootMod = 1.0 − percentile × 0.667
+            LootMod = 1.0 − percentile × 0.667<br>
+            percentile = 0.7 × valueDistance + 0.3 × rankPosition
           </div>
           <div style="margin-top:8px;color:var(--text-dim);">
-            Each player's loot score reflects the weighted value of items they've received relative to their raids attended. Item value diminishes with each time it's handed out: the first raid night an item is awarded, every recipient that night counts as the 1st receipt and gets 100% of its value; the next raid night it's handed out, recipients count from where the last batch left off — e.g. if 2 people split an item on night one, the next person to get it (even weeks later) is the 3rd recipient and counts at 80%. Value drops 10 percentage points per recipient this way, floored at 50% from the 6th recipient on. Players are ranked within their role group — the highest scorer receives ×0.33, the lowest receives ×1.0. Hover any item in the loot received dropdown for a full breakdown of how it was weighted, including its receipt order.
+            Each player's loot score reflects the weighted value of items they've received relative to their raids attended. Item value diminishes with each time it's handed out: the first raid night an item is awarded, every recipient that night counts as the 1st receipt and gets 100% of its value; the next raid night it's handed out, recipients count from where the last batch left off — e.g. if 2 people split an item on night one, the next person to get it (even weeks later) is the 3rd recipient and counts at 80%. Value drops 10 percentage points per recipient this way, floored at 50% from the 6th recipient on. Within a role group the highest scorer receives ×0.33 and the lowest receives ×1.0. Hover any item in the loot received dropdown for a full breakdown of how it was weighted, including its receipt order.
+          </div>
+          <div style="margin-top:8px;color:var(--text-dim);">
+            <strong style="color:var(--gold-dim);">How the percentile is calculated.</strong> The position between those two ends is <em>not</em> simple ranking. Pure ranking ignores how much loot actually separates two players: in an eight-person role every rank step would be worth about 14% of the range, whether the players were one point apart or three hundred. Two nearly identical raiders were being separated as hard as two genuinely different ones — 62 vs 63 loot score produced an 18% priority gap.
+            <br><br>
+            The percentile therefore blends <strong>value distance</strong> (where a player sits between the least- and most-looted in their group, weighted 0.7) with <strong>rank position</strong> (weighted 0.3). Near-identical scores now land near-identical percentiles, while a real loot gap still moves the number — that same 62 vs 63 pair is now 6.5% apart, and 45 vs 52 stays 10.6% apart. The rank term is deliberately retained: with value alone, a single runaway high-loot player would compress everyone else toward the bottom and erase all distinction between them.
+            <br><br>
+            Both ends are unchanged — the least-looted player is still exactly ×1.0 and the most-looted exactly ×0.33. Players who have received <em>no</em> loot get the full ×1.0 and are excluded from the scale itself, so an empty-handed raider does not stretch the range and penalise everyone above them. Equal loot scores always receive an identical modifier.
+            <br><br>
+            The 0.7 weighting is configurable as <code>formula.loot_percentile_value_weight</code> in <code>config.json</code>; setting it to 0 restores pure ranking.
           </div>
         </div>
 
@@ -2755,6 +2765,10 @@ let FORMULA_USE_ALT_MOD = true;
 let FORMULA_GEAR_MOD_WEIGHT = 0.1;
 let FORMULA_LOOT_MOD_FLOOR = 0.33;
 let FORMULA_LOOT_MOD_CEILING = 1.0;
+// How much of the loot percentile comes from how much MORE loot a player actually has
+// (value distance) vs. merely where they sit in the ordering (rank). 1 = pure value,
+// 0 = the old pure-rank behaviour. See computeLootPercentile.
+let FORMULA_LOOT_PERCENTILE_VALUE_WEIGHT = 0.7;
 let FORMULA_ALT_MOD_WEIGHT = 0.05;
 let FORMULA_TENURE_FORGIVENESS_HALFLIFE = 8; // raids at which forgiveness reaches 50%
 let ENABLE_APPS_SCRIPT = true; // default on; set false to use paste-in mode for CLA
@@ -3450,6 +3464,55 @@ function isWepOilExempt(playerName) {
   return false;
 }
 
+/**
+ * Loot percentile within a role group, used to build the loot modifier.
+ *
+ * The original version was pure ORDINAL RANK: pos / (n - 1). That ignores how much loot
+ * separates two players, so in a 7-person role a single rank step is always ~17% of the
+ * percentile range — about an 11% priority swing — whether the players are 1 point apart
+ * or 500. Two near-identical raiders (e.g. 74 vs 75) were being separated as hard as two
+ * genuinely different ones.
+ *
+ * We now blend that rank position with a VALUE position — where the player actually sits
+ * between the least- and most-looted in the group. Near-identical scores land near-
+ * identical percentiles, while a real loot gap still moves the number.
+ *
+ * The rank term is kept at a lower weight on purpose: with pure value normalisation, one
+ * runaway high-loot player would compress everyone else toward 0 and flatten all
+ * distinction among them. Blending preserves ordering pressure in that case.
+ *
+ * Endpoints are unchanged: the least-looted player is still exactly 0 (×ceiling) and the
+ * most-looted still exactly 1 (×floor), because both terms agree at the extremes.
+ *
+ * Tune with FORMULA_LOOT_PERCENTILE_VALUE_WEIGHT (config.json: formula.loot_percentile_value_weight)
+ *   1.0 = pure value distance,  0.0 = the old pure-rank behaviour.
+ */
+function computeLootPercentile(pts, pointValues) {
+  const out = { percentile: 0, valueNorm: 0, rankNorm: 0, blended: false };
+  if (!Array.isArray(pointValues) || !(pts > 0)) return out;
+
+  // Scale over players who have actually RECEIVED loot. A raider sitting on 0 already
+  // gets percentile 0 (full ×ceiling) from the guard above, but leaving them in the
+  // baseline drags the minimum to zero and hands them a slice of the value scale that
+  // nobody occupies — in a real Ranged DPS group one 0-loot player pushed the genuine
+  // lowest looter (52) from ×1.000 down to ×0.782, penalising them for someone else's
+  // absence. Rank uses the same filtered set for the same reason.
+  const ranked = pointValues.filter(v => v > 0).sort((a, b) => a - b);
+  const n = ranked.length;
+  if (n < 2) return out;
+  const min = ranked[0], max = ranked[n - 1];
+
+  out.rankNorm = ranked.filter(v => v < pts).length / (n - 1);
+  const spread = max - min;
+  out.valueNorm = spread > 0
+    ? Math.min(1, Math.max(0, (pts - min) / spread))
+    : 0; // everyone identical — no one is ahead of anyone
+  const w = Math.min(1, Math.max(0, FORMULA_LOOT_PERCENTILE_VALUE_WEIGHT));
+  out.percentile = w * out.valueNorm + (1 - w) * out.rankNorm;
+  out.blended = w > 0;
+  return out;
+}
+
 // Compute adjusted per-raid consume score for a player, accounting for:
 // 1. Weapon oil exemption for classes that don't use them
 // 2. Weapon oil forgiveness for remaining Physical DPS / Tanks when it's a shared issue
@@ -3629,7 +3692,8 @@ function calculatePriority(p, bottom20threshold, top20threshold, pointValues) {
     gearMod = 1 / (1 + FORMULA_GEAR_MOD_WEIGHT * gearIssueCount);
   }
 
-  // Loot score modifier — continuous based on percentile within role
+  // Loot score modifier — continuous based on percentile within role.
+  // Percentile comes from computeLootPercentile (value-aware; see there).
   const pts = pointsByPlayer[normalizeName(p.name)] ?? 0;
   const maxPts = pointValues.length > 0 ? pointValues[pointValues.length - 1] : 0;
   const nonZeroPts = pointValues.filter(v => v > 0);
@@ -3639,15 +3703,13 @@ function calculatePriority(p, bottom20threshold, top20threshold, pointValues) {
   const isZeroOrLowest = pts === 0 || (!hasZeros && minNonZeroPts !== null && pts === minNonZeroPts);
   const isTop20 = !isHighest && !isZeroOrLowest && pts >= top20threshold && pointValues.length > 0;
   const isBottom20 = !isHighest && !isZeroOrLowest && pts <= bottom20threshold && pointValues.length > 0;
-  let lootPercentile = 0;
-  if (pointValues.length > 1 && pts > 0) {
-    const ranked = [...pointValues].sort((a,b) => a-b);
-    const pos = ranked.filter(v => v < pts).length;
-    lootPercentile = pos / (ranked.length - 1);
-  }
+  const _lootPct = computeLootPercentile(pts, pointValues);
+  const lootPercentile = _lootPct.percentile;
   const lootRange = FORMULA_LOOT_MOD_CEILING - FORMULA_LOOT_MOD_FLOOR;
   const lootMod = FORMULA_LOOT_MOD_CEILING - lootPercentile * lootRange;
-  const lootTier = `Loot percentile ${(lootPercentile*100).toFixed(0)}% → ×${lootMod.toFixed(3)}`;
+  const lootTier = `Loot percentile ${(lootPercentile*100).toFixed(0)}%`
+    + (_lootPct.blended ? ` (value ${(_lootPct.valueNorm*100).toFixed(0)}%, rank ${(_lootPct.rankNorm*100).toFixed(0)}%)` : '')
+    + ` → ×${lootMod.toFixed(3)}`;
 
   // --- Updated Logic for Alt Penalty ---
   let score = attScore * consumeMod * gearMod * lootMod;
@@ -5394,6 +5456,7 @@ async function loadGearItemIdsFromRepo() {
       if (f.gear_modifier_weight     != null) FORMULA_GEAR_MOD_WEIGHT          = +f.gear_modifier_weight;
       if (f.loot_mod_floor           != null) FORMULA_LOOT_MOD_FLOOR           = +f.loot_mod_floor;
       if (f.loot_mod_ceiling         != null) FORMULA_LOOT_MOD_CEILING         = +f.loot_mod_ceiling;
+      if (f.loot_percentile_value_weight != null) FORMULA_LOOT_PERCENTILE_VALUE_WEIGHT = +f.loot_percentile_value_weight;
       if (f.alt_modifier_weight      != null) FORMULA_ALT_MOD_WEIGHT           = +f.alt_modifier_weight;
     }
     if (cfg.enable_apps_script != null) ENABLE_APPS_SCRIPT  = !!cfg.enable_apps_script;
@@ -8098,13 +8161,12 @@ function onItemChange() {
       const gearMod = 1 / (1 + 0.1 * gearIssueCount);
 
       const pts = pointsByPlayer[normalizeName(p.name)] ?? 0;
-      const ranked = [...eligThreshPts].sort((a,b) => a-b);
-      let lootPercentile = 0;
-      if (ranked.length > 1 && pts > 0) {
-        const pos = ranked.filter(v => v < pts).length;
-        lootPercentile = pos / (ranked.length - 1);
-      }
-      const lootMod = 1.0 - lootPercentile * (2/3);
+      // Shared with calculatePriority so the recommendation engine and the displayed
+      // score can't disagree. This also used to hardcode 2/3 rather than reading the
+      // configurable floor/ceiling, so retuning those knobs silently desynced the two.
+      const lootPercentile = computeLootPercentile(pts, eligThreshPts).percentile;
+      const lootMod = FORMULA_LOOT_MOD_CEILING
+        - lootPercentile * (FORMULA_LOOT_MOD_CEILING - FORMULA_LOOT_MOD_FLOOR);
 
       // Multipliers
       const prioMult  = prioMultiplier(p).mult;
