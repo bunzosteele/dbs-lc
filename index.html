@@ -501,21 +501,16 @@
     text-align: right;
   }
 
-  /* Perfect-attendance flair: 20+ raids and never missed one. Display only —
-     nothing here feeds the priority formulas. */
+  /* Perfect-attendance flair: 20+ raids and never missed one. Renders INSIDE .att-pct
+     in place of the "100%" text, so it occupies the existing column and adds no width —
+     the bar and every other row's percentage stay exactly where they were. Display only:
+     sorting reads p.pct / p.attended from the data, never this text. */
   .att-star {
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1;
     color: #f0c419;
     filter: drop-shadow(0 0 4px rgba(240,196,25,0.55));
     cursor: default;
-  }
-  /* Reserve the slot so percentages stay aligned whether or not a star is present. */
-  .att-star-slot {
-    display: inline-block;
-    width: 14px;
-    text-align: center;
-    flex: 0 0 14px;
   }
 
   .att-pct.high { color: #8abf50; }
@@ -3759,10 +3754,9 @@ function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, point
           <td>
             <div class="att-cell">
               <div class="att-bar-bg"><div class="att-bar-fill ${cls}" style="width:${barWidth}%"></div></div>
-              <span class="att-star-slot">${hasPerfectAttendance(p)
-                ? `<span class="att-star" title="Perfect attendance — ${p.attended} raids, no misses">★</span>`
-                : ''}</span>
-              <span class="att-pct ${cls}">${pctStr}</span>
+              <span class="att-pct ${cls}">${hasPerfectAttendance(p)
+                ? `<span class="att-star" title="Perfect attendance — ${p.attended} raids, ${pctStr}">★</span>`
+                : pctStr}</span>
             </div>
           </td>
         </tr>
@@ -5241,10 +5235,20 @@ async function loadClaSheetsFromRepo() {
     if (!sheets.length) return;
     if (!claSheets.length) {
       claSheets = sheets;
-      if (parsed) _claStoredParsed = parsed;
       saveClaSheets();
       renderClaList();
       updateAuthState();
+    }
+    // Adopt the parsed cache regardless of where claSheets came from.
+    //
+    // claSheets is restored from sessionStorage, so on any refresh within the same tab
+    // the branch above is skipped — and _claStoredParsed lives ONLY in KV, never in
+    // sessionStorage. Loading it inside that branch meant the cache was picked up on a
+    // cold tab and silently dropped on every refresh, which is why the load log read
+    // "cached: 0 | to fetch: 29" even though the data was sitting in KV.
+    if (parsed && Object.keys(parsed).length && !Object.keys(_claStoredParsed).length) {
+      _claStoredParsed = parsed;
+      console.log('Loaded CLA cache from KV:', Object.keys(parsed).length, 'sheet(s)');
     }
   } catch(e) {}
 }
