@@ -4674,6 +4674,31 @@ function _applyClaStoredParsed() {
       }
     }
 
+    // latestIssues — the CLEAN-PLAYER case.
+    //
+    // pd.gearIssues only contains players who HAD issues (parseGearIssues pushes only
+    // `if (issues.length)`), so it structurally cannot express "showed up in this CLA
+    // with nothing wrong". Rebuilding "latest" from gearIssues alone therefore leaves a
+    // player who fixed their gear pinned to the last raid where they had problems, and
+    // the ⚠ flag never clears. pd.latestIssues DOES carry those empty entries — it was
+    // being written to KV and never read back. Apply it under the same recency rule.
+    if (pd.latestIssues) {
+      for (const [key, data] of Object.entries(pd.latestIssues)) {
+        if (!claDataByPlayer[key]) claDataByPlayer[key] = { gearIssues: [], buffConsumables: [] };
+        const existingLabel = latestGearIssuesByPlayer[key]?.label;
+        const existingDate = existingLabel ? (claSheetDates[existingLabel] || null) : null;
+        const thisDate = claSheetDates[label] || null;
+        let isNewer;
+        if (thisDate && existingDate) { isNewer = thisDate >= existingDate; }
+        else {
+          const si = claSheets.findIndex(s => s.label === label);
+          const ei = existingLabel ? claSheets.findIndex(s => s.label === existingLabel) : -1;
+          isNewer = si >= ei;
+        }
+        if (isNewer) latestGearIssuesByPlayer[key] = { label, issues: data.issues || [] };
+      }
+    }
+
     // buffScores
     if (pd.buffScores) {
       for (const [key, scores] of Object.entries(pd.buffScores)) {
