@@ -3454,7 +3454,12 @@ function isWepOilExempt(playerName) {
 // 1. Weapon oil exemption for classes that don't use them
 // 2. Weapon oil forgiveness for remaining Physical DPS / Tanks when it's a shared issue
 // 3. Per-raid outlier forgiveness based on player's track record
-function getAdjustedConsumeScores(playerName) {
+// Returns the adjusted score keyed by raid date. getAdjustedConsumeScores() below is a
+// thin wrapper returning just the values — it existed first, and dropping the dates meant
+// the raid dots had no way to reach these numbers and coloured themselves from the RAW
+// score.total instead. That made an exempt player's dots show red for weapon oil they are
+// not expected to use, while their consumes % (which uses these adjusted values) read fine.
+function getAdjustedConsumeScoresByDate(playerName) {
   const key = normalizeName(playerName);
   const raidScores = buffScoreByPlayerDate[key] || {};
   const physical = isPhysicalRole(playerName);
@@ -3491,25 +3496,72 @@ function getAdjustedConsumeScores(playerName) {
     adjusted[dateLabel] = adjTotal;
   }
 
-  const scores = Object.values(adjusted);
-  if (!scores.length) return [];
+  const entries = Object.entries(adjusted);
+  if (!entries.length) return {};
 
   // Step 2: per-raid outlier forgiveness based on track record
   // Sort to find median
-  const sorted = [...scores].sort((a, b) => a - b);
+  const sorted = entries.map(([, v]) => v).sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)];
 
   // Forgiveness increases with raids attended — same curve as attendance
   const forgiveness = 1 - 1 / (1 + attended / 8);
 
-  return scores.map(s => {
+  const out = {};
+  for (const [dateLabel, s] of entries) {
     const gap = median - s;
-    if (gap > 20) {
-      // Outlier low raid — blend toward median
-      return s + gap * forgiveness;
+    // Outlier low raid — blend toward median
+    out[dateLabel] = gap > 20 ? s + gap * forgiveness : s;
+  }
+  return out;
+}
+
+// Values only, in raid order. Kept as-is so every existing caller is unaffected.
+function getAdjustedConsumeScores(playerName) {
+  return Object.values(getAdjustedConsumeScoresByDate(playerName));
+}
+
+// Render one "present" raid dot.
+//
+// This lived inline in TWO renderers (the main role table and the loot-tab table), which
+// is how it drifted: both coloured from the RAW score.total while the consumes column and
+// the priority modifier used the ADJUSTED score. A weapon-oil-exempt player therefore got
+// red dots for an oil they are not expected to use, next to a healthy consumes %. One
+// copy now, and it colours from the same adjusted number the score uses.
+function presentRaidDotHtml(playerName, dateLabel, displayDate) {
+  const key = normalizeName(playerName);
+  const raw = (buffScoreByPlayerDate[key] || {})[dateLabel] ?? null;
+  const adj = getAdjustedConsumeScoresByDate(playerName)[dateLabel] ?? null;
+
+  const rawPct = raw?.total ?? null;
+  const adjPct = adj !== null ? Math.round(adj) : null;
+  const scrollsPct = raw?.scrolls ?? 0;
+  const wepOilCounts = !isWepOilExempt(playerName);
+
+  let title = `${displayDate}: Present`;
+  if (adjPct !== null) {
+    title += ` | Buffs: ${adjPct}%`;
+    // Show the raw figure too when forgiveness/exemption moved it, so the number in the
+    // tooltip can always be reconciled with the CLA sheet.
+    if (rawPct !== null && Math.round(rawPct) !== adjPct) title += ` (raw ${Math.round(rawPct)}%)`;
+    const missing = [];
+    if ((raw?.elixir ?? 100) < 100) missing.push(`Elixir/Flask: ${raw.elixir}%`);
+    if ((raw?.food   ?? 100) < 100) missing.push(`Food: ${raw.food}%`);
+    // Only list weapon oil when it actually counts against this player.
+    if (wepOilCounts && (raw?.wepOil ?? 100) < 100) missing.push(`Wep Oil: ${raw.wepOil}%`);
+    if (missing.length) title += '&#10;Missing: ' + missing.join(', ');
+    if (!wepOilCounts && (raw?.wepOil ?? 100) < 100) {
+      title += '&#10;Weapon oil not required for this class/role — excluded from score.';
     }
-    return s;
-  });
+  }
+
+  // "Perfect" is judged on the adjusted score for the same reason the colour is.
+  if (adjPct !== null && adjPct >= 100 && scrollsPct === 100) {
+    return `<span class="raid-star" style="color:#4caa6e;" title="${title}">★</span>`;
+  }
+  const col = adjPct !== null ? pctColor(adjPct) : null;
+  const bgStyle = col ? `background:${col};border-color:${col};` : '';
+  return `<div class="raid-dot present" style="${bgStyle}" title="${title}"></div>`;
 }
 
 // Get a single adjusted average consume score for display / modifier use
@@ -3680,27 +3732,7 @@ function getRoleRowsHtml(sorted, dates, bottom20threshold, top20threshold, point
         } else if (!p.flags[i]) {
           dotsHtml += `<div class="raid-dot absent" title="${dates[i]}: Absent"></div>`;
         } else {
-          const buffScore = playerBuffScores[dateLabel] ?? null;
-          const buffPct = buffScore?.total ?? null;
-          const scrollsPct = buffScore?.scrolls ?? 0;
-          const isPerfect = buffPct === 100 && scrollsPct === 100;
-          let dotTitle = `${dates[i]}: Present`;
-          if (buffPct !== null) {
-            dotTitle += ` | Buffs: ${buffPct}%`;
-            const missing = [];
-            if ((buffScore.elixir ?? 100) < 100) missing.push(`Elixir/Flask: ${buffScore.elixir}%`);
-            if ((buffScore.food   ?? 100) < 100) missing.push(`Food: ${buffScore.food}%`);
-            if ((buffScore.wepOil ?? 100) < 100) missing.push(`Wep Oil: ${buffScore.wepOil}%`);
-            if (missing.length) dotTitle += '&#10;Missing: ' + missing.join(', ');
-          }
-          if (isPerfect) {
-            const col = '#4caa6e';
-            dotsHtml += `<span class="raid-star" style="color:${col};" title="${dotTitle}">★</span>`;
-          } else {
-            const col = buffPct !== null ? pctColor(buffPct) : null;
-            const bgStyle = col ? `background:${col};border-color:${col};` : '';
-            dotsHtml += `<div class="raid-dot present" style="${bgStyle}" title="${dotTitle}"></div>`;
-          }
+          dotsHtml += presentRaidDotHtml(p.name, dateLabel, dates[i]);
         }
       }
       dotsHtml += '</div>';
@@ -8857,26 +8889,7 @@ function onItemChange() {
       } else if (!p.flags[i]) {
         dotsHtml += `<div class="raid-dot absent" title="${dates[i]}: Absent"></div>`;
       } else {
-        const bs = playerBuffScores[dateLabel] ?? null;
-        const bpct = bs?.total ?? null;
-        const sp = bs?.scrolls ?? 0;
-        const isPerfect = bpct === 100 && sp === 100;
-        let dotTitle = `${dates[i]}: Present`;
-        if (bpct !== null) {
-          dotTitle += ` | Buffs: ${bpct}%`;
-          const missing = [];
-          if ((bs.elixir ?? 100) < 100) missing.push(`Elixir/Flask: ${bs.elixir}%`);
-          if ((bs.food   ?? 100) < 100) missing.push(`Food: ${bs.food}%`);
-          if ((bs.wepOil ?? 100) < 100) missing.push(`Wep Oil: ${bs.wepOil}%`);
-          if (missing.length) dotTitle += '&#10;Missing: ' + missing.join(', ');
-        }
-        if (isPerfect) {
-          dotsHtml += `<span class="raid-star" style="color:#4caa6e;" title="${dotTitle}">★</span>`;
-        } else {
-          const col = bpct !== null ? pctColor(bpct) : null;
-          const bgStyle = col ? `background:${col};border-color:${col};` : '';
-          dotsHtml += `<div class="raid-dot present" style="${bgStyle}" title="${dotTitle}"></div>`;
-        }
+        dotsHtml += presentRaidDotHtml(p.name, dateLabel, dates[i]);
       }
     }
     dotsHtml += '</div>';
