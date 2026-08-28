@@ -1517,6 +1517,45 @@ function normalizeName(name) {
     .replace(/[^a-z0-9]/g, '');       // strip everything else
 }
 
+/**
+ * Escape a value for use as a single-quoted JS string literal.
+ *
+ * Use with element.setAttribute('onclick', `fn('${jsStr(name)}')`) — setAttribute stores
+ * the value verbatim, so it must NOT be HTML-entity encoded.
+ *
+ * This existed three different ways in this file, two of them broken:
+ *   .replace(/'/g, "\'")      → in a double-quoted JS string "\'" is just ' — the
+ *                               backslash is dropped at parse time, so this replaced an
+ *                               apostrophe with an apostrophe and did nothing at all.
+ *   .replace(/'/g, "\\\\'")   → emitted  Pepe\\'s , an escaped backslash followed by a
+ *                               string terminator, which also fails to parse.
+ * Both produced "Uncaught SyntaxError: missing ) after argument list" and a button that
+ * silently did nothing, for any player or item containing an apostrophe.
+ */
+function jsStr(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')   // must come first, or it re-escapes our own backslashes
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n');
+}
+
+/**
+ * Escape a value for a single-quoted JS string inside an HTML attribute built by a
+ * template literal — e.g. html += `<button onclick="fn('${jsAttr(name)}')">`.
+ *
+ * Two layers, in order: JS-string escaping, then HTML-attribute escaping so a name
+ * containing " or & cannot terminate the attribute or corrupt an entity. The browser
+ * decodes the entities first, leaving valid JS underneath.
+ */
+function jsAttr(value) {
+  return jsStr(value)
+    .replace(/&/g, '&amp;')   // before &quot; below, or the ampersand double-encodes
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 // Normalize date strings for flexible matching: strip leading zeros, whitespace
 // e.g. "03/11", " 3/11 ", "3/11/2026" all -> "3/11"
 function normalizeDate(d) {
@@ -2602,6 +2641,24 @@ function buildLootByPlayerFromDistribution() {
   // Reverse so most recent appears first
   for (const key in result) result[key].reverse();
   return result;
+}
+
+/**
+ * The value a specific loot award actually counts for against its recipient — i.e. the
+ * exact number that feeds their Loot Score — looked up from lootByPlayer rather than
+ * recomputed.
+ *
+ * Recomputing with getWeightedItemEpv() gives the raw FORMULA value, which ignores both
+ * a glossary Loot Value override and the receipt-order multiplier. The loot log did that
+ * and so disagreed with the player dropdown about the same award.
+ *
+ * Returns the full entry ({ value, baseValue, occurrence, occMult, ... }) so callers can
+ * show a breakdown, or null when no matching award exists.
+ */
+function getCountedLootEntry(recipient, itemName, dateStr) {
+  const list = lootByPlayer[normalizeName(recipient)] || [];
+  const itemKey = normalizeName(itemName);
+  return list.find(e => normalizeName(e.name) === itemKey && e.date === dateStr) || null;
 }
 
 function parseLoot(text) {
@@ -4218,7 +4275,7 @@ function toggleLoot(td, playerName) {
   }
   const _truncItem = selectedItem && selectedItem.length > 18 ? selectedItem.slice(0, 17) + '…' : selectedItem;
   const _assignBtn = _canAssign
-    ? `<button class="write-gated" onclick="lootLogAssignFromLootTab('${playerName.replace(/'/g, "\'")}', '${selectedItem.replace(/'/g, "\'")}')"
+    ? `<button class="write-gated" onclick="lootLogAssignFromLootTab('${jsAttr(playerName)}', '${jsAttr(selectedItem)}')"
         style="background:none;border:1px solid var(--gold);color:var(--gold);padding:4px 12px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.1em;margin-left:10px;transition:background 0.15s;line-height:1.4;display:inline-flex;flex-direction:column;align-items:center;gap:0;"
         onmouseover="this.style.background='var(--gold)';this.style.color='var(--bg)'"
         onmouseout="this.style.background='none';this.style.color='var(--gold)'">
@@ -4300,10 +4357,10 @@ function toggleLoot(td, playerName) {
             var r=document.getElementById('editRole_${normalizeName(playerName)}').value;
             var c=document.getElementById('editClass_${normalizeName(playerName)}').value;
             var a=document.getElementById('editAlt_${normalizeName(playerName)}').checked;
-            rosterUpdatePlayer('${playerName.replace(/'/g,"\\\\'")}', r, c, a);
+            rosterUpdatePlayer('${jsAttr(playerName)}', r, c, a);
           " style="background:var(--gold-dim);border:none;color:var(--bg);padding:5px 12px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;">SAVE</button>
           
-          <button onclick="if(confirm('Remove ${playerName.replace(/'/g,"\\\\'")} from roster?'))rosterRemovePlayer('${playerName.replace(/'/g,"\\\\'")}');" style="background:none;border:1px solid var(--border);color:var(--text-dim);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Remove</button>
+          <button onclick="if(confirm('Remove ${jsAttr(playerName)} from roster?'))rosterRemovePlayer('${jsAttr(playerName)}');" style="background:none;border:1px solid var(--border);color:var(--text-dim);padding:5px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Remove</button>
         </div>`;
     }
   }
@@ -4317,11 +4374,11 @@ function toggleLoot(td, playerName) {
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:4px;">
         <input type="number" id="manualLootVal_${_mvKey}" placeholder="Value" min="0" step="1"
           style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:13px;width:80px;-moz-appearance:textfield;"
-          onkeydown="if(event.key==='Enter')rosterAddLootValue('${playerName.replace(/'/g,"\\\\'")}','${_mvKey}')">
+          onkeydown="if(event.key==='Enter')rosterAddLootValue('${jsAttr(playerName)}','${_mvKey}')">
         <input type="text" id="manualLootNote_${_mvKey}" placeholder="Note (e.g. transferred from OldChar)" 
           style="background:var(--bg);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:4px;font-size:13px;flex:1;min-width:180px;"
-          onkeydown="if(event.key==='Enter')rosterAddLootValue('${playerName.replace(/'/g,"\\\\'")}','${_mvKey}')">
-        <button onclick="rosterAddLootValue('${playerName.replace(/'/g,"\\\\'")}','${_mvKey}')"
+          onkeydown="if(event.key==='Enter')rosterAddLootValue('${jsAttr(playerName)}','${_mvKey}')">
+        <button onclick="rosterAddLootValue('${jsAttr(playerName)}','${_mvKey}')"
           style="background:var(--gold-dim);border:none;color:var(--bg);padding:5px 12px;border-radius:4px;cursor:pointer;font-family:'Cinzel',serif;font-size:11px;letter-spacing:0.1em;">ADD VALUE</button>
       </div>
       ${_manualTotal > 0 ? `<div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Manual value total: <span style="color:var(--gold);">${_manualTotal.toFixed(0)}</span></div>` : ''}`;
@@ -6047,7 +6104,7 @@ function lootLogRenderItems(dateStr) {
     <thead><tr style="border-bottom:1px solid var(--border);">
       <th style="text-align:left;padding:4px 8px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.15em;color:var(--text-dim);">ITEM</th>
       <th style="text-align:left;padding:4px 8px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.15em;color:var(--text-dim);">RECIPIENT</th>
-      <th style="text-align:right;padding:4px 8px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.15em;color:var(--text-dim);">WEIGHTED EPV</th>
+      <th style="text-align:right;padding:4px 8px;font-family:'Cinzel',serif;font-size:10px;letter-spacing:0.15em;color:var(--text-dim);" title="The value this item counts for against the recipient — glossary override and receipt-order multiplier included.">LOOT VALUE</th>
       <th style="width:32px;"></th>
     </tr></thead>
     <tbody>`;
@@ -6060,7 +6117,7 @@ function lootLogRenderItems(dateStr) {
       html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
         <td style="padding:5px 8px;font-size:13px;color:var(--gold-dim);"><span style="font-size:12px;">⚡</span> ${entry.item}</td>
         <td style="padding:5px 8px;font-size:13px;color:${recipientColor};">${entry.recipient}</td>
-        <td style="padding:5px 8px;font-size:13px;color:${mCol};text-align:right;">${entry.manualValue.toFixed(1)}</td>
+        <td style="padding:5px 8px;font-size:13px;color:${mCol};text-align:right;cursor:help;" title="Manual Loot Value: ${entry.manualValue.toFixed(1)}">${entry.manualValue.toFixed(1)}</td>
         <td style="padding:5px 8px;text-align:center;">
           <button class="write-gated" onclick="lootLogRemoveItem('${dateStr}', ${idx})"
             style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;padding:0 4px;"
@@ -6070,8 +6127,23 @@ function lootLogRenderItems(dateStr) {
       return;
     }
     const itemId = getItemId(entry.item);
-    const epv = itemId ? getWeightedItemEpv(entry.recipient, itemId) : 0;
+    // The value this award actually counts for, matching the player dropdown — glossary
+    // override and receipt-order multiplier included. Falls back to the raw formula value
+    // only if no matching award is found (e.g. lootByPlayer not built yet).
+    const counted = getCountedLootEntry(entry.recipient, entry.item, dateStr);
+    const formulaEpv = itemId ? getWeightedItemEpv(entry.recipient, itemId) : 0;
+    const epv = counted ? counted.value : formulaEpv;
     const epvColor = lootValueColor(epv);
+    const _valueTip = (() => {
+      if (!counted) return `Formula value: ${formulaEpv.toFixed(1)}`;
+      const overridden = counted.baseValue !== formulaEpv;
+      const base = overridden
+        ? `Loot Value: ${counted.baseValue.toFixed(1)} (overridden)`
+        : `Formula value: ${counted.baseValue.toFixed(1)}`;
+      const occN = counted.occurrence || 1;
+      const sfx = occN === 1 ? 'st' : occN === 2 ? 'nd' : occN === 3 ? 'rd' : 'th';
+      return `${base} × ${Math.round((counted.occMult ?? 1) * 100)}% (${occN}${sfx} recipient of this item) = ${counted.value.toFixed(1)}`;
+    })();
     const iconHtml = itemId && itemIcons[itemId]
       ? `<img src="https://wow.zamimg.com/images/wow/icons/small/${itemIcons[itemId]}.jpg" style="width:16px;height:16px;border-radius:2px;vertical-align:middle;margin-right:6px;" />`
       : '';
@@ -6083,7 +6155,7 @@ function lootLogRenderItems(dateStr) {
     html += `<tr style="border-bottom:1px solid rgba(255,255,255,0.04);">
       <td style="padding:5px 8px;font-size:13px;">${link}</td>
       <td style="padding:5px 8px;font-size:13px;color:${recipientColor};">${entry.recipient}</td>
-      <td style="padding:5px 8px;font-size:13px;color:${epvColor};text-align:right;">${epv > 0 ? epv.toFixed(1) : '—'}</td>
+      <td style="padding:5px 8px;font-size:13px;color:${epvColor};text-align:right;cursor:help;" title="${jsAttr(_valueTip)}">${epv > 0 ? epv.toFixed(1) : '—'}</td>
       <td style="padding:5px 8px;text-align:center;">
         <button class="write-gated" onclick="lootLogRemoveItem('${dateStr}', ${idx})"
           style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:13px;padding:0 4px;"
@@ -6352,7 +6424,7 @@ function renderAttendancePanel() {
     nameTd.className = 'player-name';
     nameTd.style.cssText = 'padding:5px 12px;white-space:nowrap;position:sticky;left:0;background:var(--bg);z-index:1;cursor:pointer;';
     nameTd.title = p.name + ' — Click to view loot';
-    nameTd.setAttribute('onclick', `toggleLoot(this, '${p.name.replace(/'/g, "\\'")}')`);
+    nameTd.setAttribute('onclick', `toggleLoot(this, '${jsStr(p.name)}')`);
     const col = classColor(p.name) || 'var(--text)';
     nameTd.innerHTML = `<span class="loot-arrow">▸</span> <span style="color:${col};">${p.name}</span>`;
     tr.appendChild(nameTd);
